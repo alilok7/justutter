@@ -1,13 +1,13 @@
-# SPEC: Utter (local, open-source dictation for Windows)
+# SPEC: JustUtter (local, open-source dictation for Windows)
 
-Utter is a system-wide, hold-to-talk dictation app. You hold a hotkey, speak, release, and cleaned-up text
+JustUtter is a system-wide, hold-to-talk dictation app. You hold a hotkey, speak, release, and cleaned-up text
 is inserted into the app you are working in. Speech recognition runs on your PC. There is no account, no
 subscription and no network use at runtime.
 
 Reference product: **Wispr Flow** (Wispr AI, Inc.).
 
 How we studied it: from public documentation and observable behaviour only. Wispr's Terms of Service §3A
-forbid decompiling or reverse engineering the app, so we did neither. Utter is written from scratch on
+forbid decompiling or reverse engineering the app, so we did neither. JustUtter is written from scratch on
 MIT-licensed open-source components.
 
 ---
@@ -77,7 +77,7 @@ Each criterion is checked by an automated test (**T**), an eval (**E**) or a man
 - E2 (T, E): `chat` removes one trailing period (keeps `!`/`?`); `email` uses sentence case and guarantees a
   final punctuation mark; `dev` removes the trailing period and leaves casing alone; `default` uses sentence
   case and keeps punctuation.
-- E3 (T): Utter only reads the executable name and window title. It never reads text-field contents or the screen.
+- E3 (T): JustUtter only reads the executable name and window title. It never reads text-field contents or the screen.
 
 ### F. Safe delivery
 - F1 (T, M): Text is pasted through a clipboard transaction, and the clipboard's previous **text** is restored
@@ -136,7 +136,7 @@ followed injected instructions. qwen2.5:3b was slower (1.35 s) and changed the s
   it contains code fences or tags; its word count is outside 0.5×–1.5× the input; it adds more than
   max(3, 30%) new words; it changes the number of line breaks; or it drops a glossary term or snippet
   text present in the input.
-- J3 (T): If Ollama is unreachable, slow (timeout 2.5 s) or returns invalid JSON, Utter falls back to the
+- J3 (T): If Ollama is unreachable, slow (timeout 2.5 s) or returns invalid JSON, JustUtter falls back to the
   rule-based text. The reason is logged and recorded in the dictation's applied rules. The first time it
   happens, the pill says the AI polish is unavailable.
 - J4 (T): Mode formatting (chat trailing period, email final punctuation) is re-applied after the polish.
@@ -147,14 +147,14 @@ followed injected instructions. qwen2.5:3b was slower (1.35 s) and changed the s
   Ctrl+Alt+Z still restores the raw Whisper transcript.
 
 ### K. Personal memory (improves with daily use, stored locally)
-Utter can't retrain Whisper on this laptop. Instead it learns three things, all stored locally in
+JustUtter can't retrain Whisper on this laptop. Instead it learns three things, all stored locally in
 `%APPDATA%\Utter\personal.json`, visible in the dashboard and deletable with "Forget everything":
-- K1 (T): **Vocabulary.** From each inserted dictation, Utter collects candidate terms: words capitalised
+- K1 (T): **Vocabulary.** From each inserted dictation, JustUtter collects candidate terms: words capitalised
   mid-sentence, mixed-case or digit-bearing tokens, and words of ≥ 10 letters. A term seen ≥ 2 times
   becomes a Whisper hotword. Glossary terms come first, and the whole list is capped at 40 terms.
   Hotwords only bias recognition; they never replace text.
 - K2 (T): **Correction learning (Ctrl+Alt+L).** The user selects their corrected text in any app and presses
-  Ctrl+Alt+L. Utter copies the selection (restoring the clipboard afterwards) and word-diffs it against
+  Ctrl+Alt+L. JustUtter copies the selection (restoring the clipboard afterwards) and word-diffs it against
   the last inserted dictation. Replaced spans of 1–4 words become proposed `heard → written` glossary
   entries, added only after the user confirms. If nothing differs, the pill says so.
 - K3 (T): **Style examples.** When a correction rephrases more than single words, the pair (inserted →

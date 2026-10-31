@@ -1,4 +1,6 @@
-# Utter: free, local, open-source AI dictation for Windows
+# JustUtter: free, local, open-source AI dictation for Windows
+
+![JustUtter: AI dictation like Wispr Flow, running 100% on your PC](submission/cover.png)
 
 Hold **Ctrl+Win**, speak, release. Clean text appears in whatever app you're typing in (Notepad, Gmail,
 Slack, VS Code, a terminal). Speech recognition runs **on your PC**: no account, no subscription,
@@ -9,7 +11,7 @@ cheap and open").
 
 ## The expensive old thing: Wispr Flow
 
-| | Wispr Flow | **Utter** |
+| | Wispr Flow | **JustUtter** |
 |---|---|---|
 | Price | Pro **$15/user/month** or $144/year; free tier capped at **2,000 words/week** on desktop ([pricing](https://wisprflow.ai/pricing), [plans](https://docs.wisprflow.ai/articles/9559327591-flow-plans-and-what-s-included)) | **$0**, unlimited |
 | Where speech is processed | "An internet connection is required for transcription" ([docs](https://docs.wisprflow.ai/articles/2772472373-what-is-flow)) | On-device Whisper; works with Wi-Fi off |
@@ -56,10 +58,10 @@ How we know it works:
   correction" from history asks for your confirmation first.
 - **Snippets:** "insert my email" inserts static text and is never executed.
 - **App-aware modes:** chat drops the trailing period, email adds final punctuation, dev leaves casing
-  alone. Utter reads only the app name and window title, never your text or screen.
+  alone. JustUtter reads only the app name and window title, never your text or screen.
 - **Safe delivery:**
   - Your clipboard is restored after pasting.
-  - If you switch windows mid-dictation, Utter copies the text instead of pasting it.
+  - If you switch windows mid-dictation, JustUtter copies the text instead of pasting it.
   - Password managers are blocked.
   - If the transcript is uncertain, the pill says "Didn't catch that" instead of inserting a guess.
 - **Ctrl+Alt+Z** swaps the cleaned text for the raw transcript in one keystroke.
@@ -78,7 +80,7 @@ ollama pull qwen2.5:1.5b                       # one-time, ~1 GB
 run.bat                                        # or: .venv\Scripts\python -m utter
 ```
 
-After the one-time model download, Utter never touches the network.
+After the one-time model download, JustUtter never touches the network.
 
 Settings, glossary and snippets live in `%APPDATA%\Utter\config.json` (validated on load; an invalid
 file is moved aside, never deleted). Logs are in `%APPDATA%\Utter\utter.log`. Audio is never saved.
@@ -99,7 +101,7 @@ Architecture: `hotkey` (chord state machine) → `audio` (16 kHz capture) → `t
 `paste` (clipboard transaction) → `ui` (pill and dashboard). `netguard` enforces offline operation.
 
 ## Known limits (honest list)
-- Simulated paste can't reach apps running **as administrator** (Windows blocks it). Utter copies the
+- Simulated paste can't reach apps running **as administrator** (Windows blocks it). JustUtter copies the
   text so you can paste manually.
 - "new line" is a command even mid-sentence ("draw a new line"), the same trade-off Wispr documents.
 - English models only for now; multilingual Whisper models are a config change away.
@@ -108,4 +110,4 @@ Architecture: `hotkey` (chord state machine) → `audio` (16 kHz capture) → `t
 
 ## Licence
 [Apache-2.0](LICENSE). See [`NOTICE`](NOTICE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-Utter is independent and not affiliated with Wispr AI, Inc.
+JustUtter is independent and not affiliated with Wispr AI, Inc.

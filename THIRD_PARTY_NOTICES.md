@@ -1,6 +1,6 @@
 # Third-party notices
 
-Utter is distributed under Apache-2.0. It does not include third-party source code. It installs and uses
+JustUtter is distributed under Apache-2.0. It does not include third-party source code. It installs and uses
 the following components, each under its own licence. Versions are pinned in `utter/pyproject.toml`.
 
 ## Direct dependencies
@@ -24,7 +24,7 @@ the following components, each under its own licence. Versions are pinned in `ut
 | [onnxruntime](https://github.com/microsoft/onnxruntime) | MIT | Runs the bundled Silero VAD model |
 | [Silero VAD](https://github.com/snakers4/silero-vad) (bundled in faster-whisper) | MIT | Voice-activity detection |
 | [huggingface_hub](https://github.com/huggingface/huggingface_hub), [tokenizers](https://github.com/huggingface/tokenizers) | Apache-2.0 | Model download (first run only) and tokenisation |
-| [PyAV](https://github.com/PyAV-Org/PyAV) | BSD-3-Clause | Its wheels bundle FFmpeg libraries under LGPL-2.1+. Utter passes raw audio arrays and never calls FFmpeg for decoding. |
+| [PyAV](https://github.com/PyAV-Org/PyAV) | BSD-3-Clause | Its wheels bundle FFmpeg libraries under LGPL-2.1+. JustUtter passes raw audio arrays and never calls FFmpeg for decoding. |
 
 ## Model weights
 
