@@ -16,7 +16,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from utter import APP_NAME
-from utter.audio import Recorder
+from utter.audio import Recorder, find_split
 from utter.cleanup import clean
 from utter.config import GlossaryEntry, Settings, app_dir, load_settings, models_dir, save_settings
 from utter.context import WindowInfo, categorize, foreground_window
@@ -33,10 +33,31 @@ _ERROR_ALREADY_EXISTS = 183
 _mutex: Any = None
 
 
+CHUNK_S = 20.0  # long recordings are transcribed in chunks of about this length while recording
+
+
+class Session:
+    """One recording. Chunk texts are filled in by the worker while the user keeps talking."""
+
+    def __init__(self, window: WindowInfo) -> None:
+        self.window = window
+        self.consumed = 0  # 16 kHz samples already sent as chunks
+        self.chunks = 0
+        self.texts: dict[int, str] = {}
+        self.cancelled = False
+
+
+class ChunkJob(BaseModel, arbitrary_types_allowed=True):
+    session: Session
+    index: int
+    audio: np.ndarray
+
+
 class Job(BaseModel, arbitrary_types_allowed=True):
     audio: np.ndarray
     window: WindowInfo
     released_at: float
+    session: Session | None = None
 
 
 class Outcome(BaseModel):
@@ -53,7 +74,9 @@ class UtterApp:
         self.guard = guard
         self.config_dir = str(app_dir())
         self.events: queue.Queue[tuple[str, Any]] = queue.Queue()
-        self.jobs: queue.Queue[Job | Literal["undo"] | None] = queue.Queue()
+        self.jobs: queue.Queue[Job | ChunkJob | Literal["undo"] | None] = queue.Queue()
+        self._session: Session | None = None
+        self._chunk_check_at = 0.0
         self.recorder = Recorder()
         self.history = History()
         self.stats_path = app_dir() / "stats.json"
@@ -121,6 +144,9 @@ class UtterApp:
             self.hotkeys.force_stop()
             self._handle("stop", (now, None))
             return
+        if now - self._chunk_check_at >= 1.0:
+            self._chunk_check_at = now
+            self._queue_ready_chunk()
         if self.hotkeys.mode == "handsfree":
             text = (f"● Hands-free {int(elapsed) // 60}:{int(elapsed) % 60:02d}"
                     "  ·  Ctrl+Win to finish  ·  Esc cancels")
@@ -128,9 +154,26 @@ class UtterApp:
                 self._last_timer_text = text
                 self.pill.set("listening", text)
 
+    def _queue_ready_chunk(self) -> None:
+        """Send the next ~20 s of a long recording to the worker, cut at a pause between words."""
+        session = self._session
+        if session is None:
+            return
+        audio = self.recorder.peek()
+        pending = audio[session.consumed:]
+        if pending.size < CHUNK_S * SAMPLE_RATE:
+            return
+        cut = session.consumed + find_split(pending)
+        self.jobs.put(ChunkJob(session=session, index=session.chunks,
+                               audio=audio[session.consumed:cut]))
+        log.info("queued chunk %d (%.1fs) for background transcription", session.chunks,
+                 (cut - session.consumed) / SAMPLE_RATE)
+        session.chunks += 1
+        session.consumed = cut
+
     def _handle(self, kind: str, payload: Any) -> None:
         if kind == "start":
-            self._start_window = foreground_window()
+            window = self._start_window = foreground_window()
             try:
                 self.recorder.start()
             except Exception as exc:  # PortAudio raises several error types for device issues
@@ -139,6 +182,7 @@ class UtterApp:
                 self.pill.set("error", f"Microphone error: {exc}", revert_ms=4000)
                 return
             self._recording_since = time.perf_counter()
+            self._session = Session(window)
             self.pill.set("listening", "● Listening…  (add Space for hands-free)")
         elif kind == "handsfree":
             self._last_timer_text = ""
@@ -146,6 +190,9 @@ class UtterApp:
         elif kind == "cancel":
             self.recorder.stop()
             self._recording_since = None
+            if self._session is not None:
+                self._session.cancelled = True
+                self._session = None
             reason = payload[1] if payload else None
             if reason == "Esc":
                 text = "Cancelled — nothing inserted"
@@ -156,11 +203,14 @@ class UtterApp:
         elif kind == "stop":
             audio = self.recorder.stop()
             self._recording_since = None
-            window = self._start_window
-            if window is None or audio.size < self.settings.min_recording_s * SAMPLE_RATE:
+            session, self._session = self._session, None
+            target = self._start_window
+            if target is None or audio.size < self.settings.min_recording_s * SAMPLE_RATE:
                 self.pill.set("warn", "Too short — hold the keys while you speak", revert_ms=2000)
                 return
-            self.jobs.put(Job(audio=audio, window=window, released_at=float(payload[0])))
+            consumed = session.consumed if session else 0
+            self.jobs.put(Job(audio=audio[consumed:], window=target,
+                              released_at=float(payload[0]), session=session))
             seconds = audio.size / SAMPLE_RATE
             self.pill.set("transcribing", f"Transcribing {seconds:.0f}s on-device…")
         elif kind == "outcome":
@@ -181,6 +231,9 @@ class UtterApp:
     # --- worker thread -----------------------------------------------------------------------
     def _worker(self) -> None:
         while (job := self.jobs.get()) is not None:
+            if isinstance(job, ChunkJob):
+                self._transcribe_chunk(job)
+                continue
             try:
                 outcome = self._undo() if job == "undo" else self._process(job)
             except Exception:  # keep the worker alive; the user sees the error and the log has it
@@ -194,15 +247,34 @@ class UtterApp:
                 except Exception:  # clipboard can be locked by another app; never crash the worker
                     log.exception("clipboard restore failed")
 
+    def _transcribe_chunk(self, job: ChunkJob) -> None:
+        if job.session.cancelled:
+            return
+        with self._settings_lock:
+            s = self.settings
+        try:
+            tr = self.transcriber.transcribe(job.audio, [g.written for g in s.glossary],
+                                             s.no_speech_threshold, s.logprob_threshold)
+        except Exception:  # a failed chunk loses only its own text; the rest still arrives
+            log.exception("chunk %d failed", job.index)
+            return
+        job.session.texts[job.index] = tr.text if tr.confident else ""
+
     def _process(self, job: Job) -> Outcome:
         with self._settings_lock:
             s = self.settings
-        tr = self.transcriber.transcribe(job.audio, [g.written for g in s.glossary],
-                                         s.no_speech_threshold, s.logprob_threshold)
-        if not tr.confident:
+        hotwords = [g.written for g in s.glossary]
+        texts = [job.session.texts.get(i, "") for i in range(job.session.chunks)] \
+            if job.session else []
+        if job.audio.size >= s.min_recording_s * SAMPLE_RATE:
+            tr = self.transcriber.transcribe(job.audio, hotwords, s.no_speech_threshold,
+                                             s.logprob_threshold)
+            texts.append(tr.text if tr.confident else "")
+        raw = " ".join(t for t in texts if t).strip()
+        if not raw:
             return Outcome(state="warn", text="Didn't catch that — nothing inserted")
         mode = categorize(job.window, s.mode_rules)
-        cleaned = clean(tr.text, mode, s.glossary, s.snippets)
+        cleaned = clean(raw, mode, s.glossary, s.snippets)
         if not cleaned.clean:
             return Outcome(state="warn", text="Nothing left to insert")
         self.hotkeys.wait_for_release()
@@ -210,7 +282,7 @@ class UtterApp:
                                                 s.blocked_exes, self.clipboard, self.keys)
         latency = time.perf_counter() - job.released_at
         self.history.add(Dictation(
-            at=datetime.now(), app=job.window.exe, mode=mode, raw=tr.text, clean=cleaned.clean,
+            at=datetime.now(), app=job.window.exe, mode=mode, raw=raw, clean=cleaned.clean,
             rules=cleaned.applied_rules, latency_s=latency, action=result.action,
         ))
         log.info("delivered: %s (%s) mode=%s latency=%.2fs rules=%s", result.action,

@@ -27,6 +27,20 @@ def resample(audio: np.ndarray, src_rate: int, dst_rate: int = SAMPLE_RATE) -> n
     return out
 
 
+def find_split(audio: np.ndarray, search_s: float = 3.0, frame_s: float = 0.03) -> int:
+    """Index of the quietest 30 ms frame in the last ``search_s`` seconds: a gap between words,
+    where a long recording can be cut into chunks without splitting a word."""
+    n = audio.size
+    frame = int(frame_s * SAMPLE_RATE)
+    start = max(0, n - int(search_s * SAMPLE_RATE))
+    count = (n - start) // frame
+    if count == 0:
+        return n
+    frames = audio[start:start + count * frame].reshape(count, frame)
+    quietest = int(np.argmin((frames.astype(np.float64) ** 2).mean(axis=1)))
+    return start + quietest * frame + frame // 2
+
+
 class Recorder:
     def __init__(self, device: int | None = None) -> None:
         self._device = device
@@ -65,6 +79,12 @@ class Recorder:
             log.info("16 kHz unsupported (%s); recording at %d Hz", exc, rate)
             self._stream, self._rate = self._open(rate), rate
         log.info("recording started at %d Hz", self._rate)
+
+    def peek(self) -> np.ndarray:
+        """Everything recorded so far, at 16 kHz, without stopping."""
+        with self._lock:
+            audio = np.concatenate(self._chunks) if self._chunks else np.zeros(0, np.float32)
+        return resample(audio, self._rate)
 
     def stop(self) -> np.ndarray:
         stream, self._stream = self._stream, None
