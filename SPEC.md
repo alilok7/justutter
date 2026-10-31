@@ -103,5 +103,26 @@ Each criterion is checked by an automated test (**T**), an eval (**E**) or a man
 - H3 (E): `evals/cleanup_cases.json` (text) and `evals/audio` + `expected.json` (speech) are re-run after any
   model or rule change.
 
+### I. Iteration 2: reliability and hands-free (from the user's first live test, 31 Oct)
+Evidence: a 23.9 s dictation was discarded silently, because a third key (probably Space) cancelled it as
+a "Windows shortcut". Release-to-text was about 1.5 s, of which about 0.4 s was the clipboard-restore
+wait. "Pterodactylus" became "pterodactylous" with base.en.
+- I1 (T): A dictation is never discarded silently. Every cancel shows its reason in the pill and is logged.
+- I2 (T): **Ctrl+Win+Space starts hands-free dictation**, either from idle or by pressing Space during a
+  hold. Recording continues after the keys are released. Pressing Ctrl+Win again (after releasing it)
+  finishes and transcribes. Esc cancels, with "Cancelled" shown. This matches Wispr's hands-free behaviour.
+- I3 (T): During a hold, any other third key cancels, and the pill names the shortcut.
+- I4 (T): Watchdog. During a hold, if the physical key state shows a chord key is up for 2 consecutive
+  100 ms checks (a key-release event was lost), the recording stops and is transcribed normally.
+- I5 (T): Recordings stop automatically at `max_recording_s` (default 600 s) and are transcribed. The
+  pill shows the elapsed time during hands-free recording.
+- I6 (T): Keys pressed more than 10 s before the chord can't block it (protects against lost key-up events).
+- I7 (T): Paste reports success before the clipboard is restored. The restore happens about 0.8 s later,
+  and only if the clipboard still holds our text, so anything the user copied in the meantime is never
+  overwritten.
+- I8 (T): The default model is **small.en** (the user chose accuracy). Existing configs are migrated once
+  (`config_version` 2) without losing the user's edits. Antigravity, Windsurf, Zed and Sublime Text map
+  to dev mode.
+
 ### Out of scope (roadmap)
 Local LLM rewriting, voice-editing of selected text, live partial transcripts, meeting capture, team sync, mobile.

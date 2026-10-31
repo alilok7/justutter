@@ -7,7 +7,7 @@ from utter.audio import resample
 from utter.config import Mode, Settings
 from utter.context import WindowInfo, categorize, is_blocked
 from utter.history import History, Stats, iso_week
-from utter.paste import deliver
+from utter.paste import deliver, restore_clipboard
 
 BLOCKED = Settings().blocked_exes
 RULES = Settings().mode_rules
@@ -48,19 +48,33 @@ class FakeKeys:
         self.typed.append(text)
 
 
-def test_paste_restores_clipboard() -> None:
+def test_paste_reports_first_then_restores_clipboard() -> None:
     cb = FakeClipboard()
     keys = FakeKeys(cb)
-    result = deliver("Hello", win(), win(), BLOCKED, cb, keys, sleep=0)
+    result, pending = deliver("Hello", win(), win(), BLOCKED, cb, keys)
     assert result.action == "pasted"
     assert keys.pasted == ["Hello"]
+    assert pending is not None
+    assert cb.text == "Hello"  # not restored yet: the app may still be reading it
+    assert restore_clipboard(cb, pending, delay_s=0) is True
     assert cb.text == "user's copied text"
+
+
+def test_restore_skipped_if_user_copied_something_new() -> None:
+    cb = FakeClipboard()
+    _, pending = deliver("Hello", win(), win(), BLOCKED, cb, FakeKeys(cb))
+    assert pending is not None
+    cb.text = "something the user just copied"
+    assert restore_clipboard(cb, pending, delay_s=0) is False
+    assert cb.text == "something the user just copied"
 
 
 def test_unicode_roundtrip() -> None:
     cb = FakeClipboard(text="原文 🙂")
     keys = FakeKeys(cb)
-    deliver("Café — naïve 你好", win(), win(), BLOCKED, cb, keys, sleep=0)
+    _, pending = deliver("Café — naïve 你好", win(), win(), BLOCKED, cb, keys)
+    assert pending is not None
+    restore_clipboard(cb, pending, delay_s=0)
     assert keys.pasted == ["Café — naïve 你好"]
     assert cb.text == "原文 🙂"
 
@@ -68,8 +82,10 @@ def test_unicode_roundtrip() -> None:
 def test_window_changed_copies_instead() -> None:
     cb = FakeClipboard()
     keys = FakeKeys(cb)
-    result = deliver("Hello", win(hwnd=1), win(hwnd=2, exe="chrome.exe"), BLOCKED, cb, keys)
+    result, pending = deliver("Hello", win(hwnd=1), win(hwnd=2, exe="chrome.exe"), BLOCKED, cb,
+                              keys)
     assert result.action == "copied"
+    assert pending is None
     assert keys.pasted == [] and keys.typed == []
     assert cb.text == "Hello"
 
@@ -77,8 +93,9 @@ def test_window_changed_copies_instead() -> None:
 def test_non_text_clipboard_is_typed_and_untouched() -> None:
     cb = FakeClipboard(text="", non_text=True)
     keys = FakeKeys(cb)
-    result = deliver("Hello", win(), win(), BLOCKED, cb, keys)
+    result, pending = deliver("Hello", win(), win(), BLOCKED, cb, keys)
     assert result.action == "typed"
+    assert pending is None
     assert keys.typed == ["Hello"]
     assert cb.history == []
 
@@ -87,17 +104,17 @@ def test_blocked_app() -> None:
     cb = FakeClipboard()
     keys = FakeKeys(cb)
     pw = win(exe="keepassxc.exe", title="KeePassXC")
-    result = deliver("secret", pw, pw, BLOCKED, cb, keys)
+    result, _ = deliver("secret", pw, pw, BLOCKED, cb, keys)
     assert result.action == "blocked"
     assert cb.history == [] and keys.pasted == []
 
 
 def test_empty_text_skipped() -> None:
     cb = FakeClipboard()
-    assert deliver("", win(), win(), BLOCKED, cb, FakeKeys(cb)).action == "skipped"
+    assert deliver("", win(), win(), BLOCKED, cb, FakeKeys(cb))[0].action == "skipped"
 
 
-def test_clipboard_restored_even_if_paste_fails() -> None:
+def test_clipboard_restored_immediately_if_paste_fails() -> None:
     cb = FakeClipboard()
 
     class BrokenKeys(FakeKeys):
@@ -105,7 +122,7 @@ def test_clipboard_restored_even_if_paste_fails() -> None:
             raise RuntimeError("injection failed")
 
     with pytest.raises(RuntimeError):
-        deliver("Hello", win(), win(), BLOCKED, cb, BrokenKeys(cb), sleep=0)
+        deliver("Hello", win(), win(), BLOCKED, cb, BrokenKeys(cb))
     assert cb.text == "user's copied text"
 
 

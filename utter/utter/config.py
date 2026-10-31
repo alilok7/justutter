@@ -62,6 +62,12 @@ def _default_snippets() -> list[Snippet]:
     ]
 
 
+CONFIG_VERSION = 2
+_DEV_EXES = ["code.exe", "cursor.exe", "windowsterminal.exe", "cmd.exe", "powershell.exe",
+             "pwsh.exe", "pycharm64.exe", "idea64.exe", "devenv.exe", "wt.exe", "antigravity.exe",
+             "antigravity ide.exe", "windsurf.exe", "zed.exe", "sublime_text.exe"]
+
+
 def _default_mode_rules() -> list[ModeRule]:
     return [
         ModeRule(
@@ -77,8 +83,7 @@ def _default_mode_rules() -> list[ModeRule]:
         ),
         ModeRule(
             mode=Mode.DEV,
-            exe=["code.exe", "cursor.exe", "windowsterminal.exe", "cmd.exe", "powershell.exe",
-                 "pwsh.exe", "pycharm64.exe", "idea64.exe", "devenv.exe", "wt.exe"],
+            exe=_DEV_EXES,
             title_contains=["visual studio code", "github"],
         ),
     ]
@@ -90,12 +95,14 @@ def _default_blocked() -> list[str]:
 
 
 class Settings(BaseModel):
+    config_version: int = CONFIG_VERSION
     hotkey: list[str] = Field(default_factory=lambda: ["ctrl", "windows"], min_length=1,
                               max_length=3)
     undo_hotkey: str = "ctrl+alt+z"
     dashboard_hotkey: str = "ctrl+alt+u"
-    model: ModelName = "base.en"
+    model: ModelName = "small.en"
     min_recording_s: float = Field(default=0.3, ge=0.0, le=5.0)
+    max_recording_s: float = Field(default=600.0, ge=5.0, le=3600.0)
     no_speech_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     logprob_threshold: float = Field(default=-1.0, le=0.0)
     glossary: list[GlossaryEntry] = Field(default_factory=_default_glossary)
@@ -147,6 +154,26 @@ def save_settings(settings: Settings, path: Path | None = None) -> None:
     log.info("settings saved to %s", target)
 
 
+def migrate(data: dict[str, object]) -> bool:
+    """Upgrade an older config in place, keeping the user's own edits. Returns True if changed."""
+    version = data.get("config_version", 1)
+    if not isinstance(version, int) or version >= CONFIG_VERSION:
+        return False
+    if version < 2:
+        if data.get("model") == "base.en":  # old default; the user chose accuracy on 31 Oct
+            data["model"] = "small.en"
+        rules = data.get("mode_rules")
+        if isinstance(rules, list):
+            for rule in rules:
+                if isinstance(rule, dict) and rule.get("mode") == Mode.DEV.value:
+                    exes = rule.setdefault("exe", [])
+                    if isinstance(exes, list):
+                        exes.extend(e for e in _DEV_EXES if e not in exes)
+    data["config_version"] = CONFIG_VERSION
+    log.info("migrated config from version %s to %s", version, CONFIG_VERSION)
+    return True
+
+
 def load_settings(path: Path | None = None) -> tuple[Settings, str | None]:
     """Load settings, creating defaults if missing.
 
@@ -160,8 +187,12 @@ def load_settings(path: Path | None = None) -> tuple[Settings, str | None]:
         return settings, None
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
-        return Settings.model_validate(data), None
-    except (json.JSONDecodeError, ValidationError, UnicodeDecodeError) as exc:
+        migrated = migrate(data)
+        settings = Settings.model_validate(data)
+        if migrated:
+            save_settings(settings, target)
+        return settings, None
+    except (json.JSONDecodeError, ValidationError, UnicodeDecodeError, TypeError) as exc:
         backup = target.with_name(f"config.invalid-{int(time.time())}.json")
         target.replace(backup)
         log.error("invalid config %s moved to %s: %s", target, backup, exc)

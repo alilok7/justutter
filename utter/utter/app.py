@@ -23,7 +23,7 @@ from utter.context import WindowInfo, categorize, foreground_window
 from utter.history import Dictation, History, load_stats, save_stats
 from utter.hotkey import HotkeyListener
 from utter.netguard import NetGuard
-from utter.paste import SystemClipboard, SystemKeys, deliver
+from utter.paste import PendingRestore, SystemClipboard, SystemKeys, deliver, restore_clipboard
 from utter.transcriber import SAMPLE_RATE, ModelMissingError, Transcriber
 from utter.ui import Dashboard, Pill
 
@@ -62,6 +62,10 @@ class UtterApp:
         self.keys = SystemKeys()
         self._settings_lock = threading.Lock()
         self._start_window: WindowInfo | None = None
+        self._recording_since: float | None = None
+        self._pending_restore: PendingRestore | None = None
+        self._last_timer_text = ""
+        self._watchdog_at = 0.0
         self.hotkeys = HotkeyListener(
             settings.hotkey, self.events,
             {"undo": settings.undo_hotkey, "dashboard": settings.dashboard_hotkey},
@@ -98,7 +102,31 @@ class UtterApp:
                 self._handle(kind, payload)
         except queue.Empty:
             pass
+        self._supervise_recording()
         self.root.after(30, self._poll)
+
+    def _supervise_recording(self) -> None:
+        """Watchdog for lost key-ups, the recording time limit and the hands-free timer."""
+        if self._recording_since is None:
+            return
+        now = time.perf_counter()
+        if now - self._watchdog_at >= 0.1:
+            self._watchdog_at = now
+            if self.hotkeys.check_stuck():
+                self._handle("stop", (now, None))
+                return
+        elapsed = now - self._recording_since
+        if elapsed >= self.settings.max_recording_s:
+            log.warning("recording hit the %.0fs limit; stopping", self.settings.max_recording_s)
+            self.hotkeys.force_stop()
+            self._handle("stop", (now, None))
+            return
+        if self.hotkeys.mode == "handsfree":
+            text = (f"● Hands-free {int(elapsed) // 60}:{int(elapsed) % 60:02d}"
+                    "  ·  Ctrl+Win to finish  ·  Esc cancels")
+            if text != self._last_timer_text:
+                self._last_timer_text = text
+                self.pill.set("listening", text)
 
     def _handle(self, kind: str, payload: Any) -> None:
         if kind == "start":
@@ -107,20 +135,34 @@ class UtterApp:
                 self.recorder.start()
             except Exception as exc:  # PortAudio raises several error types for device issues
                 log.exception("microphone failed to start")
+                self.hotkeys.force_stop()
                 self.pill.set("error", f"Microphone error: {exc}", revert_ms=4000)
                 return
-            self.pill.set("listening", "● Listening…")
+            self._recording_since = time.perf_counter()
+            self.pill.set("listening", "● Listening…  (add Space for hands-free)")
+        elif kind == "handsfree":
+            self._last_timer_text = ""
+            log.info("switched to hands-free dictation")
         elif kind == "cancel":
             self.recorder.stop()
-            self.pill.set("ready", self.pill.ready_text)
+            self._recording_since = None
+            reason = payload[1] if payload else None
+            if reason == "Esc":
+                text = "Cancelled — nothing inserted"
+            else:
+                text = f"Cancelled: {reason} is a Windows shortcut · use Ctrl+Win+Space"
+            log.info("dictation cancelled (%s)", reason)
+            self.pill.set("warn", text, revert_ms=3500)
         elif kind == "stop":
             audio = self.recorder.stop()
+            self._recording_since = None
             window = self._start_window
             if window is None or audio.size < self.settings.min_recording_s * SAMPLE_RATE:
                 self.pill.set("warn", "Too short — hold the keys while you speak", revert_ms=2000)
                 return
-            self.jobs.put(Job(audio=audio, window=window, released_at=float(payload)))
-            self.pill.set("transcribing", "Transcribing on-device…")
+            self.jobs.put(Job(audio=audio, window=window, released_at=float(payload[0])))
+            seconds = audio.size / SAMPLE_RATE
+            self.pill.set("transcribing", f"Transcribing {seconds:.0f}s on-device…")
         elif kind == "outcome":
             outcome: Outcome = payload
             self.pill.set(outcome.state, outcome.text, revert_ms=2500)
@@ -145,6 +187,12 @@ class UtterApp:
                 log.exception("dictation failed")
                 outcome = Outcome(state="error", text="Something went wrong — see utter.log")
             self.events.put(("outcome", outcome))
+            pending, self._pending_restore = self._pending_restore, None
+            if pending is not None:
+                try:
+                    restore_clipboard(self.clipboard, pending)
+                except Exception:  # clipboard can be locked by another app; never crash the worker
+                    log.exception("clipboard restore failed")
 
     def _process(self, job: Job) -> Outcome:
         with self._settings_lock:
@@ -158,8 +206,8 @@ class UtterApp:
         if not cleaned.clean:
             return Outcome(state="warn", text="Nothing left to insert")
         self.hotkeys.wait_for_release()
-        result = deliver(cleaned.clean, job.window, foreground_window(), s.blocked_exes,
-                         self.clipboard, self.keys)
+        result, self._pending_restore = deliver(cleaned.clean, job.window, foreground_window(),
+                                                s.blocked_exes, self.clipboard, self.keys)
         latency = time.perf_counter() - job.released_at
         self.history.add(Dictation(
             at=datetime.now(), app=job.window.exe, mode=mode, raw=tr.text, clean=cleaned.clean,
@@ -182,18 +230,14 @@ class UtterApp:
             return Outcome(state="warn", text="Nothing to undo")
         if last.raw.strip() == last.clean:
             return Outcome(state="warn", text="No AI edit to undo")
-        import keyboard
-
-        deadline = time.monotonic() + 2.0
-        while any(keyboard.is_pressed(k) for k in ("alt", "ctrl", "z")):
-            if time.monotonic() > deadline:
-                return Outcome(state="warn", text="Release Ctrl+Alt+Z to undo")
-            time.sleep(0.02)
+        if not self.hotkeys.wait_for_release(["alt", "ctrl", "z"]):
+            return Outcome(state="warn", text="Release Ctrl+Alt+Z to undo")
         now = foreground_window()
         self.keys.send("ctrl+z")
         time.sleep(0.15)
-        result = deliver(last.raw.strip(), now, now, self.settings.blocked_exes,
-                         self.clipboard, self.keys)
+        result, self._pending_restore = deliver(last.raw.strip(), now, now,
+                                                self.settings.blocked_exes, self.clipboard,
+                                                self.keys)
         last.action = "undone"
         log.info("undo AI edit: %s", result.action)
         return Outcome(state="done", text="↶ Raw transcript restored")

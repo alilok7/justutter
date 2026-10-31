@@ -15,7 +15,7 @@ from utter.context import WindowInfo, is_blocked
 log = logging.getLogger(__name__)
 
 _CF_UNICODETEXT = 13
-RESTORE_DELAY_S = 0.4
+RESTORE_DELAY_S = 0.8
 
 
 class Clipboard(Protocol):
@@ -63,25 +63,48 @@ class SystemKeys:
         keyboard.write(text, delay=0.002)
 
 
+class PendingRestore(BaseModel):
+    """Clipboard text to put back once the target app has read our paste."""
+
+    inserted: str
+    previous: str
+
+
 def deliver(text: str, start: WindowInfo, now: WindowInfo, blocked_exes: Sequence[str],
-            clipboard: Clipboard, keys: Keys, sleep: float = RESTORE_DELAY_S) -> DeliveryResult:
+            clipboard: Clipboard, keys: Keys) -> tuple[DeliveryResult, PendingRestore | None]:
+    """Insert text; returns the result immediately plus any clipboard restore still owed.
+
+    Call ``restore_clipboard`` with the second value after reporting success to the user.
+    """
     if not text:
-        return DeliveryResult(action="skipped", reason="nothing to insert")
+        return DeliveryResult(action="skipped", reason="nothing to insert"), None
     if is_blocked(now, blocked_exes) or is_blocked(start, blocked_exes):
         app = now.exe or start.exe
-        return DeliveryResult(action="blocked", reason=f"{app} is on the blocklist")
+        return DeliveryResult(action="blocked", reason=f"{app} is on the blocklist"), None
     if now.hwnd != start.hwnd:
         clipboard.set_text(text)
         log.info("window changed (%s -> %s); copied instead of pasting", start.exe, now.exe)
-        return DeliveryResult(action="copied", reason="window changed; press Ctrl+V to paste")
+        return DeliveryResult(action="copied", reason="window changed; press Ctrl+V to paste"), None
     if clipboard.holds_non_text():
         keys.write(text)
-        return DeliveryResult(action="typed", reason="clipboard holds non-text data; kept it")
+        return DeliveryResult(action="typed", reason="clipboard holds non-text data; kept it"), None
     previous = clipboard.get_text()
     clipboard.set_text(text)
     try:
         keys.send("ctrl+v")
-        time.sleep(sleep)  # the target app reads the clipboard asynchronously
-    finally:
+    except Exception:
         clipboard.set_text(previous)
-    return DeliveryResult(action="pasted", reason=f"into {now.exe or 'focused window'}")
+        raise
+    result = DeliveryResult(action="pasted", reason=f"into {now.exe or 'focused window'}")
+    return result, PendingRestore(inserted=text, previous=previous)
+
+
+def restore_clipboard(clipboard: Clipboard, pending: PendingRestore,
+                      delay_s: float = RESTORE_DELAY_S) -> bool:
+    """Put the user's clipboard back, unless they copied something new in the meantime."""
+    time.sleep(delay_s)  # the target app reads the clipboard asynchronously
+    if clipboard.get_text() != pending.inserted:
+        log.info("clipboard changed since paste; not restoring")
+        return False
+    clipboard.set_text(pending.previous)
+    return True
