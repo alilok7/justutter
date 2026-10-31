@@ -32,8 +32,17 @@ Price context:
 | 14 | **Savings and usage dashboard** | New | Makes the cost argument concrete for the user | Shows words dictated this week, how many words beyond Wispr's free cap, dollars saved against Wispr Pro, median latency and network requests | Built |
 | 15 | **Fully open source** | Wispr Flow, Superwhisper and Willow are proprietary | Anyone can audit, fork and self-host it | **Apache-2.0** with notices; reproducible setup; every component's licence listed | Built |
 
+## Added after the first live test (iteration 2)
+
+| # | Feature | Taken from | Why it matters | How Utter is better | Status |
+|---|---|---|---|---|---|
+| 16 | **Hands-free long dictation** (Ctrl+Win+Space, finish with Ctrl+Win, cancel with Esc) | Wispr Flow hands-free mode ([docs](https://docs.wisprflow.ai/articles/2772472373-what-is-flow)) | Long messages without holding keys | Long recordings are **transcribed in ~20 s chunks while you talk** (cut at pauses), so finishing is fast even on a CPU. A live timer shows; the cap is 10 min | Built |
+| 17 | **AI polish** (grammar, "Monday sorry Tuesday" → "Tuesday", stutters) | Wispr Smart Formatting / Backtrack, done in their cloud ([docs](https://docs.wisprflow.ai/articles/5373093536-how-do-i-use-smart-formatting-and-backtrack)) | Spoken grammar and self-corrections need more than rules | Runs a **local LLM** (qwen2.5:1.5b via Ollama on 127.0.0.1) at **0.68 s median**. **Every rewrite is validated**: questions stay questions (it can't "answer" you), instructions aren't obeyed, nothing new is added, names and glossary terms are kept. Anything suspicious falls back to the rule-based text. 10/10 adversarial evals pass | Built |
+| 18 | **Personal memory** that improves with use | Wispr "Learns your names and jargon" ([pricing](https://wisprflow.ai/pricing)); Willow "smart memory" | Accuracy on *your* words and *your* style | Fully **local and inspectable**: learned words become Whisper hints, **Ctrl+Alt+L** learns from your own fixes (after you confirm), and your rewrites become style examples for the AI polish. View it in the dashboard; "Forget everything" deletes it | Built |
+| 19 | **Never lose a dictation** | Lesson from our own first test (a 24 s dictation was silently dropped) | Trust | Every cancel shows its reason. A watchdog reads the real key state, so a lost key-release can't hang the recording. Clipboard restore waits for slow apps and never overwrites a newer copy | Built |
+
 ## Deliberately not copied (roadmap)
-- **AI rewriting with an LLM:** this can change meaning. If added, it will be optional and run on a local model,
-  with a visible diff.
+- **Cloud transcription or LLM:** possible as an opt-in "bring your own API key" mode, but it would add
+  per-use costs and send audio off the device, so local stays the default.
 - **Reading on-screen text for context:** a privacy cost Utter avoids by design.
 - **Meeting notetaker, cloud sync, team dictionaries, mobile apps:** outside the hackathon scope.

@@ -29,17 +29,25 @@ the Ctrl+Win hold gesture, cloud-only transcription, the Smart Formatting comman
 it came from, and why ours is better is in [`FEATURES.md`](FEATURES.md).
 
 How we know it works:
-- **89 automated tests**, including 26 clean-up eval cases.
+- **133 automated tests**, including 26 clean-up eval cases and 10 AI-polish safety cases.
 - **Speech evals** on this laptop: CPU only, int8, 10 locally generated clips
   ([`utter/evals/results.md`](utter/evals/results.md)).
 
 | Model | Median release-to-text | Glossary / command checks | Network requests |
 |---|---:|---:|---:|
-| Whisper base.en (default) | **0.58 s** | **100%** | **0** |
-| Whisper small.en | 1.69 s | 100% | 0 |
+| Whisper base.en (fast mode) | **0.58 s** | **100%** | **0** |
+| Whisper small.en (default, more accurate on rare words) | 1.69 s | 100% | 0 |
 
 ## Features
-- **Hold-to-talk anywhere** (Ctrl+Win, remappable).
+- **Hold-to-talk anywhere** (Ctrl+Win, remappable), plus **hands-free long dictation**
+  (Ctrl+Win+Space; finish with Ctrl+Win, cancel with Esc). Long recordings are transcribed in chunks
+  while you talk.
+- **AI polish on-device:** a local LLM (qwen2.5:1.5b via [Ollama](https://ollama.com), 127.0.0.1 only)
+  fixes grammar and self-corrections in about 0.7 s. Every rewrite is validated, and anything unsafe
+  falls back to the rule-based text ([`utter/evals/polish_results.md`](utter/evals/polish_results.md):
+  10/10).
+- **Personal memory:** learns your vocabulary and style; **Ctrl+Alt+L** learns from text you corrected.
+  Stored locally, viewable, and deletable.
 - **Proof of local:** a runtime network guard blocks and counts outbound connections; the dashboard
   shows "Network requests: 0".
 - **Clean-up you can audit:** removes fillers, handles "new line" / "new paragraph" and "scratch that"
@@ -65,6 +73,8 @@ cd utter
 python -m venv .venv
 .venv\Scripts\python -m pip install -e .[dev]
 .venv\Scripts\python -m utter download-model   # one-time, ~600 MB for both models (needs internet)
+# optional AI polish: install Ollama (winget install Ollama.Ollama), then:
+ollama pull qwen2.5:1.5b                       # one-time, ~1 GB
 run.bat                                        # or: .venv\Scripts\python -m utter
 ```
 
