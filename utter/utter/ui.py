@@ -102,7 +102,12 @@ class Dashboard:
         self.proof_vars: dict[str, tk.StringVar] = {}
         self.net_label = ttk.Label(tab, style="Good.TLabel")
         self.net_label.pack(anchor="w", pady=(10, 2))
-        for key in ("engine", "audio", "words", "cap", "price", "latency", "count"):
+        self.polish_var = tk.BooleanVar(value=self.app.settings.polish_enabled)
+        ttk.Checkbutton(tab, text="AI polish with a local LLM (grammar, self-corrections)",
+                        variable=self.polish_var,
+                        command=lambda: self.app.set_polish(self.polish_var.get())
+                        ).pack(anchor="w", pady=(4, 2))
+        for key in ("engine", "polish", "audio", "words", "cap", "price", "latency", "count"):
             var = tk.StringVar()
             self.proof_vars[key] = var
             ttk.Label(tab, textvariable=var, style="Big.TLabel").pack(anchor="w", pady=2)
@@ -117,6 +122,13 @@ class Dashboard:
         median = s.median_latency()
         price = cfg.wispr_pro_monthly_usd
         self.proof_vars["engine"].set(f"Speech model: Whisper {a.model_name} on CPU (offline)")
+        if not cfg.polish_enabled:
+            polish = "off"
+        elif a.polisher_ready:
+            polish = f"{a.polisher.model} via Ollama on 127.0.0.1 (this PC)"
+        else:
+            polish = "starting… (needs Ollama running)"
+        self.proof_vars["polish"].set(f"AI polish: {polish}")
         self.proof_vars["audio"].set("Audio saved to disk: never  ·  History: memory only")
         self.proof_vars["words"].set(f"Words dictated this week: {s.words_week:,}  "
                                      f"(total {s.words_total:,})")

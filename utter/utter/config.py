@@ -109,6 +109,10 @@ class Settings(BaseModel):
     snippets: list[Snippet] = Field(default_factory=_default_snippets)
     mode_rules: list[ModeRule] = Field(default_factory=_default_mode_rules)
     blocked_exes: list[str] = Field(default_factory=_default_blocked)
+    polish_enabled: bool = True
+    polish_model: str = Field(default="qwen2.5:1.5b", min_length=1)
+    polish_timeout_s: float = Field(default=2.5, gt=0.0, le=30.0)
+    polish_min_words: int = Field(default=6, ge=1)
     wispr_pro_monthly_usd: float = Field(default=15.0, ge=0.0)
     wispr_free_weekly_words: int = Field(default=2000, ge=0)
 

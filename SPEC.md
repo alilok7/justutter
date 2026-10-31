@@ -124,5 +124,25 @@ wait. "Pterodactylus" became "pterodactylous" with base.en.
   (`config_version` 2) without losing the user's edits. Antigravity, Windsurf, Zed and Sublime Text map
   to dev mode.
 
+### J. AI polish (local LLM via Ollama, optional)
+Evidence: benchmark on the demo laptop (31 Oct). qwen2.5:1.5b with few-shot examples and `<dictation>`
+tags handled all 8 adversarial cases at 0.84 s median and 1.03 s max. gemma3:1b answered questions and
+followed injected instructions. qwen2.5:3b was slower (1.35 s) and changed the speaker's person.
+- J1 (T): The polish runs after the rule-based clean-up, only when it's enabled, the mode isn't `dev`, and the
+  text has ≥ 6 words or a self-correction cue ("actually", "I mean", "sorry", "no wait", "rather").
+- J2 (T): Output is rejected, and the rule-based text used instead, if any of these hold: it's empty;
+  it contains code fences or tags; its word count is outside 0.5×–1.5× the input; it adds more than
+  max(3, 30%) new words; it changes the number of line breaks; or it drops a glossary term or snippet
+  text present in the input.
+- J3 (T): If Ollama is unreachable, slow (timeout 2.5 s) or returns invalid JSON, Utter falls back to the
+  rule-based text. The reason is logged and recorded in the dictation's applied rules. The first time it
+  happens, the pill says the AI polish is unavailable.
+- J4 (T): Mode formatting (chat trailing period, email final punctuation) is re-applied after the polish.
+- J5 (E): `evals/polish_cases.json` covers self-correction, grammar, greetings and names, questions and
+  instructions (which must not be answered or obeyed), and prompt injection. Run it with
+  `python -m utter eval-polish`.
+- J6: Traffic goes only to `127.0.0.1:11434`, so the network guard still counts 0 outbound requests.
+  Ctrl+Alt+Z still restores the raw Whisper transcript.
+
 ### Out of scope (roadmap)
 Local LLM rewriting, voice-editing of selected text, live partial transcripts, meeting capture, team sync, mobile.

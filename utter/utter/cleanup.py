@@ -155,6 +155,12 @@ def _apply_mode(text: str, mode: Mode, rules: list[str]) -> str:
     return text
 
 
+def format_for_mode(text: str, mode: Mode) -> tuple[str, list[str]]:
+    """Re-apply per-mode formatting, e.g. after the AI polish rewrote the text."""
+    rules: list[str] = []
+    return _apply_mode(text.strip(), mode, rules), rules
+
+
 def clean(raw: str, mode: Mode, glossary: Sequence[GlossaryEntry] = (),
           snippets: Sequence[Snippet] = ()) -> CleanResult:
     rules: list[str] = []

@@ -17,13 +17,22 @@ from pydantic import BaseModel
 
 from utter import APP_NAME
 from utter.audio import Recorder, find_split
-from utter.cleanup import clean
-from utter.config import GlossaryEntry, Settings, app_dir, load_settings, models_dir, save_settings
+from utter.cleanup import clean, format_for_mode
+from utter.config import (
+    GlossaryEntry,
+    Mode,
+    Settings,
+    app_dir,
+    load_settings,
+    models_dir,
+    save_settings,
+)
 from utter.context import WindowInfo, categorize, foreground_window
 from utter.history import Dictation, History, load_stats, save_stats
 from utter.hotkey import HotkeyListener
 from utter.netguard import NetGuard
 from utter.paste import PendingRestore, SystemClipboard, SystemKeys, deliver, restore_clipboard
+from utter.polish import Polisher, should_polish
 from utter.transcriber import SAMPLE_RATE, ModelMissingError, Transcriber
 from utter.ui import Dashboard, Pill
 
@@ -77,6 +86,9 @@ class UtterApp:
         self.jobs: queue.Queue[Job | ChunkJob | Literal["undo"] | None] = queue.Queue()
         self._session: Session | None = None
         self._chunk_check_at = 0.0
+        self.polisher = Polisher(settings.polish_model, settings.polish_timeout_s)
+        self.polisher_ready = False
+        self._polish_warned = False
         self.recorder = Recorder()
         self.history = History()
         self.stats_path = app_dir() / "stats.json"
@@ -105,6 +117,8 @@ class UtterApp:
     def run(self) -> None:
         worker = threading.Thread(target=self._worker, name="utter-worker", daemon=True)
         worker.start()
+        threading.Thread(target=self._check_polisher, name="utter-polish-check",
+                         daemon=True).start()
         self.hotkeys.start()
         self.root.after(30, self._poll)
         self.root.after(1000, self._tick)
@@ -217,6 +231,10 @@ class UtterApp:
             outcome: Outcome = payload
             self.pill.set(outcome.state, outcome.text, revert_ms=2500)
             self.dashboard.refresh_history()
+        elif kind == "notice":
+            if self._recording_since is None:
+                self.pill.set("warn", str(payload), revert_ms=4000)
+            log.info("notice: %s", payload)
         elif kind == "undo":
             self.jobs.put("undo")
         elif kind == "dashboard":
@@ -277,24 +295,60 @@ class UtterApp:
         cleaned = clean(raw, mode, s.glossary, s.snippets)
         if not cleaned.clean:
             return Outcome(state="warn", text="Nothing left to insert")
+        final, rules = self._maybe_polish(cleaned.clean, mode, s)
+        rules = cleaned.applied_rules + rules
         self.hotkeys.wait_for_release()
-        result, self._pending_restore = deliver(cleaned.clean, job.window, foreground_window(),
+        result, self._pending_restore = deliver(final, job.window, foreground_window(),
                                                 s.blocked_exes, self.clipboard, self.keys)
         latency = time.perf_counter() - job.released_at
         self.history.add(Dictation(
-            at=datetime.now(), app=job.window.exe, mode=mode, raw=raw, clean=cleaned.clean,
-            rules=cleaned.applied_rules, latency_s=latency, action=result.action,
+            at=datetime.now(), app=job.window.exe, mode=mode, raw=raw, clean=final,
+            rules=rules, latency_s=latency, action=result.action,
         ))
         log.info("delivered: %s (%s) mode=%s latency=%.2fs rules=%s", result.action,
-                 result.reason, mode.value, latency, cleaned.applied_rules)
+                 result.reason, mode.value, latency, rules)
         if result.action in ("pasted", "typed", "copied"):
-            self.stats.record(len(cleaned.clean.split()), latency)
+            self.stats.record(len(final.split()), latency)
             save_stats(self.stats, self.stats_path)
         labels = {"pasted": "✓ Inserted", "typed": "✓ Typed", "copied": "Copied — window changed",
                   "blocked": "Blocked app — nothing inserted", "skipped": "Nothing to insert"}
         state: Literal["done", "warn"] = "done" if result.action in ("pasted", "typed") else "warn"
         return Outcome(state=state, text=f"{labels[result.action]} · {mode.value} · "
                                          f"{latency:.1f}s")
+
+    def _maybe_polish(self, text: str, mode: Mode, s: Settings) -> tuple[str, list[str]]:
+        if not (s.polish_enabled and self.polisher_ready and
+                should_polish(text, mode, s.polish_min_words)):
+            return text, []
+        protected = [g.written for g in s.glossary] + [sn.text for sn in s.snippets]
+        result = self.polisher.polish(text, protected)
+        if not result.used:
+            if not self._polish_warned:
+                self._polish_warned = True
+                self.events.put(("notice", f"AI polish skipped: {result.reason[:60]}"))
+            return text, [f"ai polish skipped: {result.reason}"]
+        polished, mode_rules = format_for_mode(result.text, mode)
+        return polished, [f"ai polish: {self.polisher.model} ({result.latency_s:.2f}s)",
+                          *mode_rules]
+
+    def _check_polisher(self) -> None:
+        """Background: confirm Ollama + model are present and load the model into memory."""
+        if not self.settings.polish_enabled:
+            return
+        problem = self.polisher.available()
+        if problem:
+            self.events.put(("notice", f"AI polish off: {problem}"))
+            return
+        self.polisher.warmup()
+        self.polisher_ready = True
+        log.info("ai polish ready (%s)", self.polisher.model)
+
+    def set_polish(self, enabled: bool) -> None:
+        with self._settings_lock:
+            self.settings = self.settings.model_copy(update={"polish_enabled": enabled})
+            save_settings(self.settings)
+        if enabled and not self.polisher_ready:
+            threading.Thread(target=self._check_polisher, daemon=True).start()
 
     def _undo(self) -> Outcome:
         last = self.history.last()
