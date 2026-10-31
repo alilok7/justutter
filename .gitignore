@@ -12,3 +12,4 @@ utter/evals/audio/
 
 # Local state
 *.log
+*.egg-info/

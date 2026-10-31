@@ -1,8 +1,0 @@
-pyproject.toml
-utter/__init__.py
-utter.egg-info/PKG-INFO
-utter.egg-info/SOURCES.txt
-utter.egg-info/dependency_links.txt
-utter.egg-info/entry_points.txt
-utter.egg-info/requires.txt
-utter.egg-info/top_level.txt
