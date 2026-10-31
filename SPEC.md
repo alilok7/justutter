@@ -1,0 +1,107 @@
+# SPEC: Utter (local, open-source dictation for Windows)
+
+Utter is a system-wide, hold-to-talk dictation app. You hold a hotkey, speak, release, and cleaned-up text
+is inserted into the app you are working in. Speech recognition runs on your PC. There is no account, no
+subscription and no network use at runtime.
+
+Reference product: **Wispr Flow** (Wispr AI, Inc.).
+
+How we studied it: from public documentation and observable behaviour only. Wispr's Terms of Service §3A
+forbid decompiling or reverse engineering the app, so we did neither. Utter is written from scratch on
+MIT-licensed open-source components.
+
+---
+
+## 1. Original app behaviour (evidence)
+
+| # | Wispr Flow behaviour | Evidence (accessed 31 Oct 2026) |
+|---|---|---|
+| O1 | On Windows you hold the shortcut, speak and release to insert text. The default shortcut is **Ctrl + Win**, and it can be customised. | [What is Flow](https://docs.wisprflow.ai/articles/2772472373-what-is-flow) |
+| O2 | **"An internet connection is required for transcription."** | [What is Flow](https://docs.wisprflow.ai/articles/2772472373-what-is-flow) |
+| O3 | Text is inserted after you stop, with no live word-by-word transcript. | [What is Flow](https://docs.wisprflow.ai/articles/2772472373-what-is-flow) |
+| O4 | Formatting cleans up filler words, grammar, punctuation and capitalisation. It does not correct misheard words. | [Smart Formatting & Backtrack](https://docs.wisprflow.ai/articles/5373093536-how-do-i-use-smart-formatting-and-backtrack) |
+| O5 | Spoken commands: "new line" / "next line" / "line break" / "skip a line" give a line break; "new paragraph" / "start a new paragraph" give a paragraph break; punctuation can be spoken by name. | same |
+| O6 | Backtrack: trigger phrases such as "actually", "scratch that" and "never mind" remove self-corrections, decided by AI using context. Example: "Let's do coffee at 2 actually 3" becomes "Let's do coffee at 3." | same |
+| O7 | Trailing-period removal depends on Writing Style and app category. With no style set, it applies to up to two sentences in messaging apps, and it keeps `!` and `?`. | same |
+| O8 | The original transcript is kept, and "Undo AI edit" restores it from the Home tab. You then copy and paste it manually. | same |
+| O9 | Context Awareness reads text near the cursor, on-screen text and app info, and sorts the app into Email / Work messaging / Personal messaging / Other. | [Context Awareness](https://docs.wisprflow.ai/articles/4678293671-feature-context-awareness) |
+| O10 | Password fields are excluded from context, and so are sensitive or numeric fields and banking/financial apps. Custom or web password fields "may be read like normal text fields". | same |
+| O11 | Has a dictionary for names and recurring terms, plus snippets. | [What is Flow](https://docs.wisprflow.ai/articles/2772472373-what-is-flow), [Pricing](https://wisprflow.ai/pricing) |
+| O12 | Price: Free is capped at 2,000 words/week on desktop. Pro costs $15/user/month or $144/year. | [Pricing](https://wisprflow.ai/pricing), [Plans](https://docs.wisprflow.ai/articles/9559327591-flow-plans-and-what-s-included) |
+| O13 | Reach: "millions of consumers and 100,000 businesses". Raised $280M at a $2B valuation (Aug 2026). | [Fortune](https://fortune.com/2026/08/17/wispr-2-billion-valuation-dictations-only-the-beginning/), [TechCrunch](https://techcrunch.com/2026/08/17/wispr-raises-280m-at-2b-valuation-as-it-looks-beyond-dictation/) |
+
+---
+
+## 2. Acceptance criteria
+
+Each criterion is checked by an automated test (**T**), an eval (**E**) or a manual run on the demo PC (**M**).
+
+### A. Hold-to-talk anywhere
+- A1 (T, M): Pressing Ctrl and Win together, in either order, starts recording. Releasing either key stops it.
+  Ctrl+Win combined with any third key (such as Ctrl+Win+→) does **not** trigger dictation.
+- A2 (M): Releasing the chord does not open the Start menu.
+- A3 (T): The hotkey can be changed in `config.json`, and an invalid value is rejected with a clear error.
+- A4 (T): Recordings shorter than 0.3 s are discarded without transcribing.
+
+### B. Local transcription
+- B1 (T): The model loads with `local_files_only=True`. If the model is missing, the app shows
+  "run `python -m utter download-model`" and exits cleanly.
+- B2 (E): On the eval set, word error rate (WER) ≤ 15% with the default model.
+- B3 (E, M): The median time from key release to text ready is ≤ 2.0 s for a 5–10 s utterance on the demo laptop.
+- B4 (T): If the transcript is empty, or `no_speech_prob` > 0.6, or `avg_logprob` < −1.0, **nothing is
+  pasted** and the pill shows "Didn't catch that".
+
+### C. Proof of local
+- C1 (T): At runtime, any outbound network attempt (`socket.connect` or `getaddrinfo` to a non-loopback
+  address) is blocked and counted.
+- C2 (M): The dashboard shows "Network requests: 0" after a dictation session.
+- C3 (M): Dictation works with Wi-Fi turned off.
+- C4 (T): No audio is ever written to disk. History is held in memory only and is text-only.
+
+### D. Clean-up (deterministic, explainable)
+- D1 (T, E): The fillers "um", "uh", "er", "erm" and "hmm" are removed, along with the surrounding stray commas
+  and double spaces. Words like "like" and "you know" are left alone because they can carry meaning.
+- D2 (T, E): "new line" / "next line" / "line break" become `\n`; "new paragraph" / "start a new paragraph"
+  become `\n\n`. Whitespace and capitalisation around them are fixed up.
+- D3 (T, E): "scratch that" deletes the sentence or clause dictated immediately before it. If nothing comes
+  before it, the phrase is simply removed.
+- D4 (T, E): Glossary entries (`heard → written`) replace whole words or phrases, ignoring case. Each
+  replacement is recorded in `applied_rules`.
+- D5 (T, E): Snippets: saying the exact trigger phrase (e.g. "insert my email") inserts its static text.
+  Snippets are never executed.
+- D6 (T): Every clean-up returns both the `raw` and the `clean` text, plus the list of applied rules.
+
+### E. App-aware modes (no screen reading)
+- E1 (T): The foreground app's executable name and window title map to one of `chat | email | dev | default`.
+  The mapping is configurable.
+- E2 (T, E): `chat` removes one trailing period (keeps `!`/`?`); `email` uses sentence case and guarantees a
+  final punctuation mark; `dev` removes the trailing period and leaves casing alone; `default` uses sentence
+  case and keeps punctuation.
+- E3 (T): Utter only reads the executable name and window title. It never reads text-field contents or the screen.
+
+### F. Safe delivery
+- F1 (T, M): Text is pasted through a clipboard transaction, and the clipboard's previous **text** is restored
+  afterwards. If the clipboard holds non-text data that can't be restored, the text is typed out instead,
+  leaving the clipboard untouched.
+- F2 (T): If the foreground window changed between pressing and releasing the hotkey, nothing is pasted. The
+  text is copied to the clipboard and the pill shows "Copied (window changed)".
+- F3 (T): Apps on the blocklist (password managers by default) get nothing pasted, and the pill says why.
+- F4 (T, M): Ctrl+Alt+Z ("undo AI edit") undoes the last paste and pastes the raw transcript instead.
+
+### G. Dashboard and savings
+- G1 (M): The pill shows the states Listening / Transcribing / Pasted / Didn't catch that, and it never takes
+  keyboard focus.
+- G2 (T, M): The dashboard shows words dictated this week, words over Wispr's 2,000/week free cap, money saved
+  against Wispr Pro at $15/month, the model in use, median latency, and the network request count.
+- G3 (M): The History tab shows raw and clean text plus the applied rules. "Learn correction" adds a
+  `heard → written` glossary entry after the user confirms it.
+
+### H. Reliability (from CLAUDE.md)
+- H1 (T): Config, glossary, snippets and transcription results are validated with Pydantic models.
+- H2: Every step is logged to `%APPDATA%\Utter\utter.log`. There are no bare `except:` blocks and no
+  swallowed errors.
+- H3 (E): `evals/cleanup_cases.json` (text) and `evals/audio` + `expected.json` (speech) are re-run after any
+  model or rule change.
+
+### Out of scope (roadmap)
+Local LLM rewriting, voice-editing of selected text, live partial transcripts, meeting capture, team sync, mobile.

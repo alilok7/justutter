@@ -1,0 +1,11 @@
+Utter
+Copyright 2026 Aliasgar Lokhandwala and Utter contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It depends on third-party open-source software and model weights that are distributed
+under their own licences. See THIRD_PARTY_NOTICES.md for the list and licence terms.
+
+Utter is an independent project. It is not affiliated with, endorsed by, or derived from the
+code of Wispr AI, Inc. or any other product it is compared against. Product names are used
+only to describe publicly documented behaviour and pricing.

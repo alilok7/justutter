@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Models and generated eval audio (regenerate with `python -m utter download-model` / evals/make_audio.ps1)
+models/
+utter/evals/audio/
+
+# Local state
+*.log
