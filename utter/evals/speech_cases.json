@@ -1,0 +1,12 @@
+[
+  {"id": "s01-plain", "say": "Hey team, the design review is moved to tomorrow afternoon.", "reference": "hey team the design review is moved to tomorrow afternoon", "must_contain": []},
+  {"id": "s02-question", "say": "Can you send me the slides before the meeting?", "reference": "can you send me the slides before the meeting", "must_contain": []},
+  {"id": "s03-glossary", "say": "We tested the Mera Lion model and the results look promising.", "reference": "we tested the mera lion model and the results look promising", "must_contain": ["MERaLiON"]},
+  {"id": "s04-acronym", "say": "I study computer science at N. U. S.", "reference": "i study computer science at n u s", "must_contain": ["NUS"]},
+  {"id": "s05-glossary-github", "say": "Please push the latest changes to Git Hub tonight.", "reference": "please push the latest changes to git hub tonight", "must_contain": ["GitHub"]},
+  {"id": "s06-paragraph", "say": "Thanks for coming. New paragraph. The next steps are listed below.", "reference": "thanks for coming new paragraph the next steps are listed below", "must_contain": ["\n\n"]},
+  {"id": "s07-backtrack", "say": "The demo is on Monday, scratch that, the demo is on Tuesday.", "reference": "the demo is on monday scratch that the demo is on tuesday", "must_contain": ["Tuesday"], "must_not_contain": ["Monday"]},
+  {"id": "s08-plain", "say": "Let me know if you have any questions about the project.", "reference": "let me know if you have any questions about the project", "must_contain": []},
+  {"id": "s09-plain", "say": "Our hackathon project runs entirely on the laptop without internet.", "reference": "our hackathon project runs entirely on the laptop without internet", "must_contain": []},
+  {"id": "s10-list", "say": "Remember to buy milk, eggs and bread on the way home.", "reference": "remember to buy milk eggs and bread on the way home", "must_contain": []}
+]
