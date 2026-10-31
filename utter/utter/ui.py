@@ -126,10 +126,12 @@ def logo_icon() -> QIcon:
 class FloatingBar(QWidget):
     """Hidden while idle; fades in at bottom-centre; never activates or takes input."""
 
-    HEIGHT = 44
+    HEIGHT = 44  # design units; the whole bar is drawn at `scale` of this size
     MARGIN = 10  # room for the glow ring and shadow
+    MIN_TEXT_PT = 7.0  # text never shrinks below this, so it stays readable
 
-    def __init__(self, level_source: Callable[[], float] = lambda: 0.0) -> None:
+    def __init__(self, level_source: Callable[[], float] = lambda: 0.0,
+                 scale: float = 1.0, minimal: bool = True) -> None:
         super().__init__(None)
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint
@@ -144,9 +146,15 @@ class FloatingBar(QWidget):
         self._levels = [0.0] * 5
         self._phase = 0.0
         self._started = time.monotonic()
-        self._font = QFont(ui_font(), 10)
+        self.scale = scale
+        self.minimal = minimal
+        # Fonts are sized in design units (the painter is scaled), so divide by the scale to
+        # get the on-screen size, floored for legibility.
+        self._font = QFont(ui_font())
+        self._font.setPointSizeF(max(self.MIN_TEXT_PT, 10 * scale) / scale)
         self._font.setWeight(QFont.Weight.Medium)
-        self._detail_font = QFont(ui_font(), 9)
+        self._detail_font = QFont(ui_font())
+        self._detail_font.setPointSizeF(max(self.MIN_TEXT_PT - 0.5, 9 * scale) / scale)
         self._anim = QTimer(self)
         self._anim.setInterval(33)
         self._anim.timeout.connect(self._step)
@@ -165,6 +173,10 @@ class FloatingBar(QWidget):
             return
         if state != self.state and state in ("listening", "handsfree", "working"):
             self._started = time.monotonic()
+        if self.minimal:  # icons speak for themselves; results get one short word
+            detail = ""
+            if state in ("listening", "working"):
+                text = ""
         self.state, self.text, self.detail = state, text, detail
         self._relayout()
         if not self.isVisible() or self._fade.endValue() == 0.0:
@@ -183,14 +195,16 @@ class FloatingBar(QWidget):
         icon = 27 if self.state in ("listening", "handsfree") else 22
         if self.state == "handsfree":
             icon += 21
-        width = 12 + icon + 12 + fm.horizontalAdvance(self.text) + 16
+        width = 14 + icon + 14
+        if self.text:
+            width += fm.horizontalAdvance(self.text) + 14
         if self.detail:
             width += 10 + dfm.horizontalAdvance(self.detail)
         return width
 
     def _relayout(self) -> None:
-        w = self._content_width() + 2 * self.MARGIN
-        h = self.HEIGHT + 2 * self.MARGIN
+        w = math.ceil((self._content_width() + 2 * self.MARGIN) * self.scale)
+        h = math.ceil((self.HEIGHT + 2 * self.MARGIN) * self.scale)
         screen = QApplication.primaryScreen()
         area = screen.availableGeometry() if screen else None
         self.resize(w, h)
@@ -242,8 +256,10 @@ class FloatingBar(QWidget):
     def paintEvent(self, _event: object) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        p.scale(self.scale, self.scale)
         m = self.MARGIN
-        rect = QRectF(m, m, self.width() - 2 * m, self.HEIGHT)
+        rect = QRectF(m, m, self.width() / self.scale - 2 * m, self.HEIGHT)
         radius = self.HEIGHT / 2
         if self.state in ("listening", "handsfree"):
             glow = QColor(ACCENT)
@@ -258,7 +274,7 @@ class FloatingBar(QWidget):
         p.setBrush(QColor(11, 12, 15, 225))
         p.drawRoundedRect(rect, radius, radius)
 
-        x = rect.left() + 12
+        x = rect.left() + 14
         cy = rect.center().y()
         if self.state == "handsfree":
             dot = QColor(DANGER)
@@ -273,7 +289,7 @@ class FloatingBar(QWidget):
             x = self._paint_spinner(p, x, cy)
         else:
             x = self._paint_badge(p, x, cy)
-        x += 12
+        x += 14
         p.setPen(QColor(TEXT))
         p.setFont(self._font)
         fm = QFontMetrics(self._font)

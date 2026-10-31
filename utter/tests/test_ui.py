@@ -49,12 +49,38 @@ def test_bar_reverts_after_timeout(qt: QApplication) -> None:
 
 
 def test_bar_width_hugs_content(qt: QApplication) -> None:
-    bar = FloatingBar()
+    bar = FloatingBar(minimal=False)
     bar.set("warn", "Too short")
     short = bar.width()
     bar.set("warn", "Too short", "hold the keys while you speak")
     assert bar.width() > short
     bar.set("ready", "")
+
+
+def test_minimal_bar_drops_hints_and_details(qt: QApplication) -> None:
+    bar = FloatingBar()
+    bar.set("listening", "Listening", "Space hands-free · Esc cancel")
+    assert (bar.text, bar.detail) == ("", "")
+    bar.set("working", "Polishing", "local AI")
+    assert (bar.text, bar.detail) == ("", "")
+    bar.set("done", "Inserted", "email · 1.8s")
+    assert (bar.text, bar.detail) == ("Inserted", "")
+    icon_only = FloatingBar()
+    icon_only.set("listening", "")
+    assert bar.width() > icon_only.width()
+    bar.set("ready", "")
+    icon_only.set("ready", "")
+
+
+def test_bar_scale_halves_the_footprint(qt: QApplication) -> None:
+    full, half = FloatingBar(scale=1.0), FloatingBar(scale=0.5)
+    for bar in (full, half):
+        bar.set("listening", "Listening", "Space hands-free · Esc cancel")
+    assert half.height() == full.height() // 2
+    assert half.width() < full.width() * 0.75  # text has a legibility floor, so a bit over half
+    assert half._font.pointSizeF() * half.scale == pytest.approx(FloatingBar.MIN_TEXT_PT)
+    full.set("ready", "")
+    half.set("ready", "")
 
 
 def test_handsfree_timer_counts(qt: QApplication) -> None:

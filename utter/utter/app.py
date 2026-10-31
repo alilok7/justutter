@@ -120,7 +120,7 @@ class UtterApp:
         )
         self.paused = False
         self.qt = make_app()
-        self.pill = FloatingBar(lambda: self.recorder.level)
+        self.pill = FloatingBar(lambda: self.recorder.level, settings.bar_scale)
         self.dashboard = Dashboard(self)
         self.tray = Tray(self)
         self._timers: list[QTimer] = []
