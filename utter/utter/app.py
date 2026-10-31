@@ -211,7 +211,7 @@ class UtterApp:
                 return
             self._recording_since = time.perf_counter()
             self._session = Session(window)
-            self.pill.set("listening", "● Listening…  (add Space for hands-free)")
+            self.pill.set("listening", "● Listening…  (Space: hands-free · Esc: cancel)")
         elif kind == "handsfree":
             self._last_timer_text = ""
             log.info("switched to hands-free dictation")
@@ -222,12 +222,8 @@ class UtterApp:
                 self._session.cancelled = True
                 self._session = None
             reason = payload[1] if payload else None
-            if reason == "Esc":
-                text = "Cancelled — nothing inserted"
-            else:
-                text = f"Cancelled: {reason} is a Windows shortcut · use Ctrl+Win+Space"
             log.info("dictation cancelled (%s)", reason)
-            self.pill.set("warn", text, revert_ms=3500)
+            self.pill.set("warn", f"Cancelled ({reason}) — nothing inserted", revert_ms=3000)
         elif kind == "stop":
             audio = self.recorder.stop()
             self._recording_since = None

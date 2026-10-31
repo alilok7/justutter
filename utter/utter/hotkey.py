@@ -90,18 +90,16 @@ class ChordState:
             return None
         repeat = name in self.others
         self.others.setdefault(name, now)
-        if self.mode == "hold" and not repeat:
-            if name == self.handsfree_key:
-                self.mode, self.rearmed = "handsfree", False
-                return "handsfree"
-            self.mode, self.await_release = "idle", True
-            self.cancel_reason = f"{'+'.join(k.title() for k in self.keys)}+{name.title()}"
-            return "cancel"
-        if self.mode == "handsfree" and name == self.cancel_key:
+        if repeat or self.mode == "idle":
+            return None
+        if self.mode == "hold" and name == self.handsfree_key:
+            self.mode, self.rearmed = "handsfree", False
+            return "handsfree"
+        if name == self.cancel_key:
             self.mode, self.await_release = "idle", bool(self.down)
             self.cancel_reason = "Esc"
             return "cancel"
-        return None
+        return None  # any other key: keep recording
 
     def force_stop(self) -> ChordEvent | None:
         """Stop an active recording from outside the key stream (watchdog, time limit)."""

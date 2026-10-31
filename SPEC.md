@@ -111,7 +111,9 @@ wait. "Pterodactylus" became "pterodactylous" with base.en.
 - I2 (T): **Ctrl+Win+Space starts hands-free dictation**, either from idle or by pressing Space during a
   hold. Recording continues after the keys are released. Pressing Ctrl+Win again (after releasing it)
   finishes and transcribes. Esc cancels, with "Cancelled" shown. This matches Wispr's hands-free behaviour.
-- I3 (T): During a hold, any other third key cancels, and the pill names the shortcut.
+- I3 (T): *(Changed at the user's request, 31 Oct.)* During a hold, other keys are ignored and recording
+  continues. Only **Esc** cancels, and Space switches to hands-free. If a Windows shortcut (e.g.
+  Ctrl+Win+→) moves focus, the window-changed guard (F2) copies the text instead of pasting it.
 - I4 (T): Watchdog. During a hold, if the physical key state shows a chord key is up for 2 consecutive
   100 ms checks (a key-release event was lost), the recording stops and is transcribed normally.
 - I5 (T): Recordings stop automatically at `max_recording_s` (default 600 s) and are transcribed. The

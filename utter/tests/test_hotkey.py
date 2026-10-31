@@ -40,12 +40,21 @@ def test_key_repeat_does_not_restart() -> None:
     assert press(s, "ctrl", "left windows", "ctrl") == [None, None, None]
 
 
-def test_third_key_cancels_immediately_with_reason() -> None:
+def test_other_keys_during_hold_keep_recording() -> None:
     s = chord()
     press(s, "ctrl", "left windows")
-    assert press(s, "right") == ["cancel"]
-    assert s.cancel_reason == "Ctrl+Windows+Right"
-    assert release(s, "right", "left windows", "ctrl") == [None, None, None]
+    assert press(s, "right", "a", "tab") == [None, None, None]
+    assert s.mode == "hold"
+    release(s, "right", "a", "tab")
+    assert release(s, "left windows") == ["stop"]
+
+
+def test_escape_cancels_a_hold() -> None:
+    s = chord()
+    press(s, "ctrl", "left windows")
+    assert press(s, "esc") == ["cancel"]
+    assert s.cancel_reason == "Esc"
+    release(s, "esc", "left windows", "ctrl")
     assert press(s, "ctrl", "left windows") == [None, "start"]
 
 
