@@ -70,8 +70,9 @@ def cmd_eval(names: Sequence[str]) -> int:
 
 
 def cmd_run() -> int:
-    print("The dictation app is not implemented yet; try `eval` or `download-model`.")
-    return 2
+    from utter.app import main as run_app
+
+    return run_app()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
