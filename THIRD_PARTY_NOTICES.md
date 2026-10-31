@@ -14,6 +14,8 @@ the following components, each under its own licence. Versions are pinned in `ut
 | [pyperclip](https://github.com/asweigart/pyperclip) 1.11.0 | Clipboard access | BSD-3-Clause |
 | [NumPy](https://numpy.org) | Audio buffers | BSD-3-Clause |
 | [Pydantic](https://github.com/pydantic/pydantic) 2.14.2 | Validating config and results | MIT |
+| [PySide6-Essentials](https://doc.qt.io/qtforpython-6/) 6.10.1 (Qt for Python) | Floating bar, dashboard, tray icon | LGPL-3.0 (used unmodified, dynamically linked via the official wheels; you can swap in your own build) |
+| [Ollama](https://github.com/ollama/ollama) + [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) (optional) | Local AI polish over 127.0.0.1 | Ollama: MIT · Qwen2.5-1.5B: Apache-2.0. Installed separately by the user, not bundled |
 
 ## Pulled in by faster-whisper
 

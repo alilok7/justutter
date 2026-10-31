@@ -15,6 +15,7 @@ dependencies = [
     "pyperclip==1.11.0",
     "numpy>=2.0",
     "pydantic==2.14.2",
+    "PySide6-Essentials==6.10.1",
 ]
 
 [project.optional-dependencies]

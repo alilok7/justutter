@@ -48,6 +48,7 @@ class Recorder:
         self._lock = threading.Lock()
         self._stream: Any = None
         self._rate = SAMPLE_RATE
+        self.level = 0.0  # RMS of the latest audio block; drives the live waveform
 
     @property
     def recording(self) -> bool:
@@ -56,8 +57,10 @@ class Recorder:
     def _callback(self, indata: np.ndarray, _frames: int, _time: Any, status: Any) -> None:
         if status:
             log.warning("audio status: %s", status)
+        samples = indata[:, 0].copy()
+        self.level = float(np.sqrt(np.mean(samples * samples))) if samples.size else 0.0
         with self._lock:
-            self._chunks.append(indata[:, 0].copy())
+            self._chunks.append(samples)
 
     def _open(self, rate: int) -> Any:
         stream = sd.InputStream(samplerate=rate, channels=1, dtype="float32",

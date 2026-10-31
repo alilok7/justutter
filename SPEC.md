@@ -164,5 +164,23 @@ Utter can't retrain Whisper on this laptop. Instead it learns three things, all 
   Audio is still never stored. personal.json holds only terms, counts and the correction pairs the
   user taught it.
 
+### L. UI: "Midnight Glass" (chosen by the user, 31 Oct; mockup Concept 1)
+Built with PySide6 (Qt, LGPL-3.0). Palette: background #101216, glass rgba(11,12,15,0.88), hairline
+rgba(255,255,255,0.10), text #F4F5F7 / #A7ADB8, accent mint #3EE6B5, warning #FFB547. Font: Inter if
+installed, otherwise Segoe UI.
+- L1 (T): The floating bar is hidden while idle. It fades in at bottom-centre (just above the taskbar) on
+  Ctrl+Win and fades out 2.5 s after a result. It never takes focus or blocks clicks.
+- L2 (T): Bar states: listening (live waveform driven by the real mic level, plus a mint glow ring),
+  hands-free (red dot, waveform, timer), working (spinner, "Transcribing" or "Polishing"), done (mint
+  check), warn (amber), error (red), cancelled. Each shows a primary label and a muted detail.
+- L3 (T): The dashboard has a sidebar with Home · History · Dictionary · Snippets · Memory · Settings.
+  - Home shows savings against Wispr Pro, words this week (and how many are over the free cap), median
+    latency, the "On-device · Network requests: N" badge, toggles for AI polish and Learn from me, and
+    the 5 most recent dictations with mode badges.
+- L4 (T): A tray icon with a menu: Open dashboard, Pause dictation (while paused, Ctrl+Win does nothing
+  and the bar says "Paused" once), AI polish on/off, Quit. Clicking the tray icon toggles the dashboard.
+- L5 (M): The learn-correction dialog matches the theme, showing the corrections in monospace with "Not now"
+  and "Learn" buttons.
+
 ### Out of scope (roadmap)
 Local LLM rewriting, voice-editing of selected text, live partial transcripts, meeting capture, team sync, mobile.

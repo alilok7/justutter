@@ -1,4 +1,4 @@
-"""Wires hotkey -> recorder -> transcriber -> clean-up -> paste. Tk owns the main thread."""
+"""Wires hotkey -> recorder -> transcriber -> clean-up -> paste. Qt owns the main thread."""
 
 from __future__ import annotations
 
@@ -7,13 +7,12 @@ import logging
 import queue
 import threading
 import time
-import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox
 from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel
+from PySide6.QtCore import QTimer
 
 from utter import APP_NAME
 from utter.audio import Recorder, find_split
@@ -44,7 +43,7 @@ from utter.personal import (
 )
 from utter.polish import Polisher, should_polish
 from utter.transcriber import SAMPLE_RATE, ModelMissingError, Transcriber
-from utter.ui import Dashboard, Pill
+from utter.ui import Dashboard, FloatingBar, Tray, confirm_learn, error_box, make_app
 
 log = logging.getLogger(__name__)
 
@@ -80,8 +79,9 @@ class Job(BaseModel, arbitrary_types_allowed=True):
 
 
 class Outcome(BaseModel):
-    state: Literal["done", "warn", "error"]
+    state: Literal["done", "warn", "error", "cancelled"]
     text: str
+    detail: str = ""
 
 
 class UtterApp:
@@ -112,20 +112,20 @@ class UtterApp:
         self._start_window: WindowInfo | None = None
         self._recording_since: float | None = None
         self._pending_restore: PendingRestore | None = None
-        self._last_timer_text = ""
         self._watchdog_at = 0.0
         self.hotkeys = HotkeyListener(
             settings.hotkey, self.events,
             {"undo": settings.undo_hotkey, "dashboard": settings.dashboard_hotkey,
              "learn": settings.correction_hotkey},
         )
-        self.root = tk.Tk()
-        self.root.withdraw()
-        chord = "+".join(k.title() for k in settings.hotkey).replace("Windows", "Win")
-        self.pill = Pill(self.root, f"{APP_NAME} · hold {chord} to dictate", self.toggle_dashboard)
-        self.dashboard = Dashboard(self.root, self)
+        self.paused = False
+        self.qt = make_app()
+        self.pill = FloatingBar(lambda: self.recorder.level)
+        self.dashboard = Dashboard(self)
+        self.tray = Tray(self)
+        self._timers: list[QTimer] = []
         if warning:
-            self.pill.set("warn", warning, revert_ms=6000)
+            self.pill.set("warn", "Config reset", warning, revert_ms=6000)
 
     # --- main-thread loop --------------------------------------------------------------------
     def run(self) -> None:
@@ -134,17 +134,20 @@ class UtterApp:
         threading.Thread(target=self._check_polisher, name="utter-polish-check",
                          daemon=True).start()
         self.hotkeys.start()
-        self.root.after(30, self._poll)
-        self.root.after(1000, self._tick)
+        for interval, fn in ((30, self._poll), (1000, self._tick)):
+            timer = QTimer()
+            timer.timeout.connect(fn)
+            timer.start(interval)
+            self._timers.append(timer)
+        self.tray.show()
         log.info("%s ready", APP_NAME)
         try:
-            self.root.mainloop()
+            self.qt.exec()
         finally:
             self._shutdown()
 
     def _tick(self) -> None:
         self.dashboard.tick()
-        self.root.after(1000, self._tick)
 
     def _poll(self) -> None:
         try:
@@ -154,7 +157,6 @@ class UtterApp:
         except queue.Empty:
             pass
         self._supervise_recording()
-        self.root.after(30, self._poll)
 
     def _supervise_recording(self) -> None:
         """Watchdog for lost key-ups, the recording time limit and the hands-free timer."""
@@ -175,12 +177,8 @@ class UtterApp:
         if now - self._chunk_check_at >= 1.0:
             self._chunk_check_at = now
             self._queue_ready_chunk()
-        if self.hotkeys.mode == "handsfree":
-            text = (f"● Hands-free {int(elapsed) // 60}:{int(elapsed) % 60:02d}"
-                    "  ·  Ctrl+Win to finish  ·  Esc cancels")
-            if text != self._last_timer_text:
-                self._last_timer_text = text
-                self.pill.set("listening", text)
+        if self.hotkeys.mode == "handsfree" and self.pill.state != "handsfree":
+            self.pill.set("handsfree", "0:00", "Ctrl+Win to finish · Esc cancels")
 
     def _queue_ready_chunk(self) -> None:
         """Send the next ~20 s of a long recording to the worker, cut at a pause between words."""
@@ -201,19 +199,22 @@ class UtterApp:
 
     def _handle(self, kind: str, payload: Any) -> None:
         if kind == "start":
+            if self.paused:
+                self.hotkeys.force_stop()
+                self.pill.set("paused", "Paused", "resume from the tray icon", revert_ms=1800)
+                return
             window = self._start_window = foreground_window()
             try:
                 self.recorder.start()
             except Exception as exc:  # PortAudio raises several error types for device issues
                 log.exception("microphone failed to start")
                 self.hotkeys.force_stop()
-                self.pill.set("error", f"Microphone error: {exc}", revert_ms=4000)
+                self.pill.set("error", "Microphone error", str(exc)[:60], revert_ms=4000)
                 return
             self._recording_since = time.perf_counter()
             self._session = Session(window)
-            self.pill.set("listening", "● Listening…  (Space: hands-free · Esc: cancel)")
+            self.pill.set("listening", "Listening", "Space hands-free · Esc cancel")
         elif kind == "handsfree":
-            self._last_timer_text = ""
             log.info("switched to hands-free dictation")
         elif kind == "cancel":
             self.recorder.stop()
@@ -223,27 +224,29 @@ class UtterApp:
                 self._session = None
             reason = payload[1] if payload else None
             log.info("dictation cancelled (%s)", reason)
-            self.pill.set("warn", f"Cancelled ({reason}) — nothing inserted", revert_ms=3000)
+            self.pill.set("cancelled", "Cancelled", "nothing inserted", revert_ms=2500)
         elif kind == "stop":
             audio = self.recorder.stop()
             self._recording_since = None
             session, self._session = self._session, None
             target = self._start_window
             if target is None or audio.size < self.settings.min_recording_s * SAMPLE_RATE:
-                self.pill.set("warn", "Too short — hold the keys while you speak", revert_ms=2000)
+                self.pill.set("warn", "Too short", "hold the keys while you speak", revert_ms=2000)
                 return
             consumed = session.consumed if session else 0
             self.jobs.put(Job(audio=audio[consumed:], window=target,
                               released_at=float(payload[0]), session=session))
             seconds = audio.size / SAMPLE_RATE
-            self.pill.set("transcribing", f"Transcribing {seconds:.0f}s on-device…")
+            self.pill.set("working", "Transcribing", f"{seconds:.0f}s · on-device")
         elif kind == "outcome":
             outcome: Outcome = payload
-            self.pill.set(outcome.state, outcome.text, revert_ms=2500)
-            self.dashboard.refresh_history()
+            self.pill.set(outcome.state, outcome.text, outcome.detail, revert_ms=2500)
+            self.dashboard.refresh()
+        elif kind == "phase":
+            self.pill.set("working", *payload)
         elif kind == "notice":
             if self._recording_since is None:
-                self.pill.set("warn", str(payload), revert_ms=4000)
+                self.pill.set("warn", "Heads up", str(payload), revert_ms=4000)
             log.info("notice: %s", payload)
         elif kind == "learn":
             self.jobs.put("learn")
@@ -258,7 +261,11 @@ class UtterApp:
         self.dashboard.toggle()
 
     def quit(self) -> None:
-        self.root.quit()
+        self.qt.quit()
+
+    def set_paused(self, paused: bool) -> None:
+        self.paused = paused
+        log.info("dictation %s", "paused" if paused else "resumed")
 
     # --- worker thread -----------------------------------------------------------------------
     def _worker(self) -> None:
@@ -275,7 +282,8 @@ class UtterApp:
                     outcome = self._process(job)
             except Exception:  # keep the worker alive; the user sees the error and the log has it
                 log.exception("dictation failed")
-                outcome = Outcome(state="error", text="Something went wrong — see utter.log")
+                outcome = Outcome(state="error", text="Something went wrong",
+                                  detail="see utter.log")
             self.events.put(("outcome", outcome))
             pending, self._pending_restore = self._pending_restore, None
             if pending is not None:
@@ -309,7 +317,7 @@ class UtterApp:
             texts.append(tr.text if tr.confident else "")
         raw = " ".join(t for t in texts if t).strip()
         if not raw:
-            return Outcome(state="warn", text="Didn't catch that — nothing inserted")
+            return Outcome(state="warn", text="Didn't catch that", detail="nothing inserted")
         mode = categorize(job.window, s.mode_rules)
         cleaned = clean(raw, mode, s.glossary, s.snippets)
         if not cleaned.clean:
@@ -333,11 +341,14 @@ class UtterApp:
                     record_dictation(self.memory, final)
                     save_memory(self.memory, self.memory_path)
             save_stats(self.stats, self.stats_path)
-        labels = {"pasted": "✓ Inserted", "typed": "✓ Typed", "copied": "Copied — window changed",
-                  "blocked": "Blocked app — nothing inserted", "skipped": "Nothing to insert"}
+        labels = {"pasted": ("Inserted", f"{mode.value} · {latency:.1f}s"),
+                  "typed": ("Typed", f"{mode.value} · {latency:.1f}s"),
+                  "copied": ("Copied", "window changed · Ctrl+V to paste"),
+                  "blocked": ("Blocked app", "nothing inserted"),
+                  "skipped": ("Nothing to insert", "")}
+        text, detail = labels[result.action]
         state: Literal["done", "warn"] = "done" if result.action in ("pasted", "typed") else "warn"
-        return Outcome(state=state, text=f"{labels[result.action]} · {mode.value} · "
-                                         f"{latency:.1f}s")
+        return Outcome(state=state, text=text, detail=detail)
 
     def _maybe_polish(self, text: str, mode: Mode, s: Settings) -> tuple[str, list[str]]:
         if not (s.polish_enabled and self.polisher_ready and
@@ -347,6 +358,7 @@ class UtterApp:
         with self._memory_lock:
             examples = self.memory.style_examples[-3:] if s.learn_enabled else []
             self.polisher.extra_shots = [(e.before, e.after) for e in examples]
+        self.events.put(("phase", ("Polishing", "local AI")))
         result = self.polisher.polish(text, protected)
         if not result.used:
             if not self._polish_warned:
@@ -388,14 +400,15 @@ class UtterApp:
         """Ctrl+Alt+L: diff the user's corrected selection against the last dictation."""
         last = self.history.last()
         if last is None:
-            return Outcome(state="warn", text="Dictate something first, then fix it and press "
-                                              "Ctrl+Alt+L")
+            return Outcome(state="warn", text="Nothing to learn yet",
+                           detail="dictate, fix it, then press Ctrl+Alt+L")
         if not self.settings.learn_enabled:
-            return Outcome(state="warn", text="Learning is off (dashboard → Glossary)")
+            return Outcome(state="warn", text="Learning is off", detail="turn it on in Memory")
         if not self.hotkeys.wait_for_release(["ctrl", "alt", "l"]):
-            return Outcome(state="warn", text="Release Ctrl+Alt+L to learn")
+            return Outcome(state="warn", text="Release Ctrl+Alt+L", detail="then try again")
         if self.clipboard.holds_non_text():
-            return Outcome(state="warn", text="Clipboard holds an image — copy text first")
+            return Outcome(state="warn", text="Clipboard holds an image",
+                           detail="copy some text first")
         previous = self.clipboard.get_text()
         marker = f"utter-selection-marker-{time.monotonic()}"
         self.clipboard.set_text(marker)
@@ -406,20 +419,16 @@ class UtterApp:
         finally:
             self.clipboard.set_text(previous)
         if not selection.strip() or selection == marker:
-            return Outcome(state="warn", text="Select your corrected text, then press Ctrl+Alt+L")
+            return Outcome(state="warn", text="Nothing selected",
+                           detail="select your corrected text, then Ctrl+Alt+L")
         proposal = propose_corrections(last.clean, selection.strip())
         if not proposal.pairs and proposal.style_example is None:
-            return Outcome(state="warn", text="No differences from the last dictation")
+            return Outcome(state="warn", text="No differences", detail="from the last dictation")
         self.events.put(("confirm_learn", proposal))
-        return Outcome(state="done", text="Review what to learn…")
+        return Outcome(state="done", text="Review what to learn")
 
     def _confirm_learn(self, proposal: CorrectionProposal) -> None:
-        lines = [f"  '{h}'  →  '{w}'" for h, w in proposal.pairs]
-        question = ("Learn these corrections?\n\n" + "\n".join(lines)) if lines else ""
-        if proposal.style_example is not None:
-            question += ("\n\n" if question else "") + \
-                "Also remember your rewrite as a style example for AI polish?"
-        if not messagebox.askyesno(APP_NAME, question):
+        if not confirm_learn(proposal):
             log.info("user declined to learn %d corrections", len(proposal.pairs))
             return
         existing = {g.heard.lower() for g in self.settings.glossary}
@@ -433,8 +442,8 @@ class UtterApp:
                 add_style_example(self.memory, proposal.style_example)
             self.memory.corrections_learned += len(proposal.pairs)
             save_memory(self.memory, self.memory_path)
-        self.pill.set("done", f"✓ Learned {len(proposal.pairs)} correction(s)", revert_ms=2500)
-        self.dashboard.refresh_glossary()
+        self.pill.set("done", f"Learned {len(proposal.pairs)} correction(s)", revert_ms=2500)
+        self.dashboard.refresh()
 
     def set_learning(self, enabled: bool) -> None:
         with self._settings_lock:
@@ -454,7 +463,7 @@ class UtterApp:
         if last.raw.strip() == last.clean:
             return Outcome(state="warn", text="No AI edit to undo")
         if not self.hotkeys.wait_for_release(["alt", "ctrl", "z"]):
-            return Outcome(state="warn", text="Release Ctrl+Alt+Z to undo")
+            return Outcome(state="warn", text="Release Ctrl+Alt+Z", detail="then try again")
         now = foreground_window()
         self.keys.send("ctrl+z")
         time.sleep(0.15)
@@ -463,7 +472,7 @@ class UtterApp:
                                                 self.keys)
         last.action = "undone"
         log.info("undo AI edit: %s", result.action)
-        return Outcome(state="done", text="↶ Raw transcript restored")
+        return Outcome(state="done", text="Raw transcript restored", detail="AI edit undone")
 
     # --- glossary edits (main thread) --------------------------------------------------------
     def add_glossary(self, heard: str, written: str) -> None:
@@ -495,20 +504,9 @@ def _single_instance() -> bool:
     return int(kernel32.GetLastError()) != _ERROR_ALREADY_EXISTS
 
 
-def _error_box(text: str) -> None:
-    root = tk.Tk()
-    root.withdraw()
-    messagebox.showerror(APP_NAME, text)
-    root.destroy()
-
-
 def main() -> int:
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except OSError:
-        log.info("DPI awareness not available")
     if not _single_instance():
-        _error_box(f"{APP_NAME} is already running.")
+        error_box(f"{APP_NAME} is already running.")
         return 1
     settings, warning = load_settings()
     guard = NetGuard()
@@ -516,7 +514,7 @@ def main() -> int:
     try:
         transcriber = Transcriber(settings.model, models_dir())
     except ModelMissingError as exc:
-        _error_box(str(exc))
+        error_box(str(exc))
         return 1
     transcriber.warmup()
     UtterApp(settings, warning, transcriber, guard).run()
