@@ -109,6 +109,8 @@ class Settings(BaseModel):
     snippets: list[Snippet] = Field(default_factory=_default_snippets)
     mode_rules: list[ModeRule] = Field(default_factory=_default_mode_rules)
     blocked_exes: list[str] = Field(default_factory=_default_blocked)
+    learn_enabled: bool = True
+    correction_hotkey: str = "ctrl+alt+l"
     polish_enabled: bool = True
     polish_model: str = Field(default="qwen2.5:1.5b", min_length=1)
     polish_timeout_s: float = Field(default=2.5, gt=0.0, le=30.0)

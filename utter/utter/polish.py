@@ -119,6 +119,7 @@ class Polisher:
         self.model = model
         self.timeout_s = timeout_s
         self.url = url
+        self.extra_shots: list[tuple[str, str]] = []  # the user's own style examples
 
     def _post(self, path: str, payload: dict[str, object], timeout: float) -> bytes:
         req = urllib.request.Request(f"{self.url}{path}", data=json.dumps(payload).encode(),
@@ -145,7 +146,7 @@ class Polisher:
 
     def _messages(self, text: str) -> list[dict[str, str]]:
         msgs = [{"role": "system", "content": SYSTEM}]
-        for raw, cleaned in SHOTS:
+        for raw, cleaned in [*SHOTS, *self.extra_shots]:
             msgs += [{"role": "user", "content": f"<dictation>{raw}</dictation>"},
                      {"role": "assistant", "content": cleaned}]
         msgs.append({"role": "user", "content": f"<dictation>{text}</dictation>"})

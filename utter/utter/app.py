@@ -32,6 +32,16 @@ from utter.history import Dictation, History, load_stats, save_stats
 from utter.hotkey import HotkeyListener
 from utter.netguard import NetGuard
 from utter.paste import PendingRestore, SystemClipboard, SystemKeys, deliver, restore_clipboard
+from utter.personal import (
+    CorrectionProposal,
+    PersonalMemory,
+    add_style_example,
+    hotwords,
+    load_memory,
+    propose_corrections,
+    record_dictation,
+    save_memory,
+)
 from utter.polish import Polisher, should_polish
 from utter.transcriber import SAMPLE_RATE, ModelMissingError, Transcriber
 from utter.ui import Dashboard, Pill
@@ -83,7 +93,10 @@ class UtterApp:
         self.guard = guard
         self.config_dir = str(app_dir())
         self.events: queue.Queue[tuple[str, Any]] = queue.Queue()
-        self.jobs: queue.Queue[Job | ChunkJob | Literal["undo"] | None] = queue.Queue()
+        self.jobs: queue.Queue[Job | ChunkJob | Literal["undo", "learn"] | None] = queue.Queue()
+        self.memory_path = app_dir() / "personal.json"
+        self.memory = load_memory(self.memory_path)
+        self._memory_lock = threading.Lock()
         self._session: Session | None = None
         self._chunk_check_at = 0.0
         self.polisher = Polisher(settings.polish_model, settings.polish_timeout_s)
@@ -103,7 +116,8 @@ class UtterApp:
         self._watchdog_at = 0.0
         self.hotkeys = HotkeyListener(
             settings.hotkey, self.events,
-            {"undo": settings.undo_hotkey, "dashboard": settings.dashboard_hotkey},
+            {"undo": settings.undo_hotkey, "dashboard": settings.dashboard_hotkey,
+             "learn": settings.correction_hotkey},
         )
         self.root = tk.Tk()
         self.root.withdraw()
@@ -235,6 +249,10 @@ class UtterApp:
             if self._recording_since is None:
                 self.pill.set("warn", str(payload), revert_ms=4000)
             log.info("notice: %s", payload)
+        elif kind == "learn":
+            self.jobs.put("learn")
+        elif kind == "confirm_learn":
+            self._confirm_learn(payload)
         elif kind == "undo":
             self.jobs.put("undo")
         elif kind == "dashboard":
@@ -253,7 +271,12 @@ class UtterApp:
                 self._transcribe_chunk(job)
                 continue
             try:
-                outcome = self._undo() if job == "undo" else self._process(job)
+                if job == "undo":
+                    outcome = self._undo()
+                elif job == "learn":
+                    outcome = self._learn_from_selection()
+                else:
+                    outcome = self._process(job)
             except Exception:  # keep the worker alive; the user sees the error and the log has it
                 log.exception("dictation failed")
                 outcome = Outcome(state="error", text="Something went wrong — see utter.log")
@@ -271,7 +294,7 @@ class UtterApp:
         with self._settings_lock:
             s = self.settings
         try:
-            tr = self.transcriber.transcribe(job.audio, [g.written for g in s.glossary],
+            tr = self.transcriber.transcribe(job.audio, self._hotwords(s),
                                              s.no_speech_threshold, s.logprob_threshold)
         except Exception:  # a failed chunk loses only its own text; the rest still arrives
             log.exception("chunk %d failed", job.index)
@@ -281,7 +304,7 @@ class UtterApp:
     def _process(self, job: Job) -> Outcome:
         with self._settings_lock:
             s = self.settings
-        hotwords = [g.written for g in s.glossary]
+        hotwords = self._hotwords(s)
         texts = [job.session.texts.get(i, "") for i in range(job.session.chunks)] \
             if job.session else []
         if job.audio.size >= s.min_recording_s * SAMPLE_RATE:
@@ -309,6 +332,10 @@ class UtterApp:
                  result.reason, mode.value, latency, rules)
         if result.action in ("pasted", "typed", "copied"):
             self.stats.record(len(final.split()), latency)
+            if s.learn_enabled:
+                with self._memory_lock:
+                    record_dictation(self.memory, final)
+                    save_memory(self.memory, self.memory_path)
             save_stats(self.stats, self.stats_path)
         labels = {"pasted": "✓ Inserted", "typed": "✓ Typed", "copied": "Copied — window changed",
                   "blocked": "Blocked app — nothing inserted", "skipped": "Nothing to insert"}
@@ -320,7 +347,10 @@ class UtterApp:
         if not (s.polish_enabled and self.polisher_ready and
                 should_polish(text, mode, s.polish_min_words)):
             return text, []
-        protected = [g.written for g in s.glossary] + [sn.text for sn in s.snippets]
+        protected = self._hotwords(s) + [sn.text for sn in s.snippets]
+        with self._memory_lock:
+            examples = self.memory.style_examples[-3:] if s.learn_enabled else []
+            self.polisher.extra_shots = [(e.before, e.after) for e in examples]
         result = self.polisher.polish(text, protected)
         if not result.used:
             if not self._polish_warned:
@@ -349,6 +379,77 @@ class UtterApp:
             save_settings(self.settings)
         if enabled and not self.polisher_ready:
             threading.Thread(target=self._check_polisher, daemon=True).start()
+
+    # --- personal memory ---------------------------------------------------------------------
+    def _hotwords(self, s: Settings) -> list[str]:
+        glossary_terms = [g.written for g in s.glossary]
+        if not s.learn_enabled:
+            return glossary_terms
+        with self._memory_lock:
+            return hotwords(self.memory, glossary_terms)
+
+    def _learn_from_selection(self) -> Outcome:
+        """Ctrl+Alt+L: diff the user's corrected selection against the last dictation."""
+        last = self.history.last()
+        if last is None:
+            return Outcome(state="warn", text="Dictate something first, then fix it and press "
+                                              "Ctrl+Alt+L")
+        if not self.settings.learn_enabled:
+            return Outcome(state="warn", text="Learning is off (dashboard → Glossary)")
+        if not self.hotkeys.wait_for_release(["ctrl", "alt", "l"]):
+            return Outcome(state="warn", text="Release Ctrl+Alt+L to learn")
+        if self.clipboard.holds_non_text():
+            return Outcome(state="warn", text="Clipboard holds an image — copy text first")
+        previous = self.clipboard.get_text()
+        marker = f"utter-selection-marker-{time.monotonic()}"
+        self.clipboard.set_text(marker)
+        try:
+            self.keys.send("ctrl+c")
+            time.sleep(0.3)
+            selection = self.clipboard.get_text()
+        finally:
+            self.clipboard.set_text(previous)
+        if not selection.strip() or selection == marker:
+            return Outcome(state="warn", text="Select your corrected text, then press Ctrl+Alt+L")
+        proposal = propose_corrections(last.clean, selection.strip())
+        if not proposal.pairs and proposal.style_example is None:
+            return Outcome(state="warn", text="No differences from the last dictation")
+        self.events.put(("confirm_learn", proposal))
+        return Outcome(state="done", text="Review what to learn…")
+
+    def _confirm_learn(self, proposal: CorrectionProposal) -> None:
+        lines = [f"  '{h}'  →  '{w}'" for h, w in proposal.pairs]
+        question = ("Learn these corrections?\n\n" + "\n".join(lines)) if lines else ""
+        if proposal.style_example is not None:
+            question += ("\n\n" if question else "") + \
+                "Also remember your rewrite as a style example for AI polish?"
+        if not messagebox.askyesno(APP_NAME, question):
+            log.info("user declined to learn %d corrections", len(proposal.pairs))
+            return
+        existing = {g.heard.lower() for g in self.settings.glossary}
+        for heard, written in proposal.pairs:
+            if heard.lower() not in existing:
+                self.add_glossary(heard, written)
+        with self._memory_lock:
+            for _heard, written in proposal.pairs:
+                self.memory.vocab[written] = self.memory.vocab.get(written, 0) + 2
+            if proposal.style_example is not None:
+                add_style_example(self.memory, proposal.style_example)
+            self.memory.corrections_learned += len(proposal.pairs)
+            save_memory(self.memory, self.memory_path)
+        self.pill.set("done", f"✓ Learned {len(proposal.pairs)} correction(s)", revert_ms=2500)
+        self.dashboard.refresh_glossary()
+
+    def set_learning(self, enabled: bool) -> None:
+        with self._settings_lock:
+            self.settings = self.settings.model_copy(update={"learn_enabled": enabled})
+            save_settings(self.settings)
+
+    def forget_memory(self) -> None:
+        with self._memory_lock:
+            self.memory = PersonalMemory()
+            save_memory(self.memory, self.memory_path)
+        log.info("personal memory cleared by user")
 
     def _undo(self) -> Outcome:
         last = self.history.last()

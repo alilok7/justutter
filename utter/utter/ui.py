@@ -232,10 +232,21 @@ class Dashboard:
         ttk.Button(row, text="Delete selected", command=self._delete_gloss).pack(side="left")
         ttk.Label(tab, text="Snippets (say the trigger; static text only, never executed)"
                   ).pack(anchor="w", pady=(8, 0))
-        self.snips = ttk.Treeview(tab, columns=("trigger", "text"), show="headings", height=4)
+        self.snips = ttk.Treeview(tab, columns=("trigger", "text"), show="headings", height=3)
         self.snips.heading("trigger", text="Say")
         self.snips.heading("text", text="Inserts")
         self.snips.pack(fill="x")
+        mem = ttk.LabelFrame(tab, text="Personal memory (personal.json on this PC)", padding=6)
+        mem.pack(fill="x", pady=(8, 0))
+        self.learn_var = tk.BooleanVar(value=self.app.settings.learn_enabled)
+        ttk.Checkbutton(mem, text="Learn from my dictations and corrections (Ctrl+Alt+L)",
+                        variable=self.learn_var,
+                        command=lambda: self.app.set_learning(self.learn_var.get())
+                        ).pack(anchor="w")
+        self.memory_var = tk.StringVar()
+        ttk.Label(mem, textvariable=self.memory_var, wraplength=680, justify="left"
+                  ).pack(anchor="w", pady=4)
+        ttk.Button(mem, text="Forget everything", command=self._forget).pack(anchor="w")
 
     def refresh_glossary(self) -> None:
         self.gloss.delete(*self.gloss.get_children())
@@ -244,6 +255,17 @@ class Dashboard:
         self.snips.delete(*self.snips.get_children())
         for s in self.app.settings.snippets:
             self.snips.insert("", "end", values=(s.trigger, s.text.replace("\n", " ⏎ ")))
+        m = self.app.memory
+        top = sorted(m.vocab.items(), key=lambda kv: -kv[1])[:12]
+        terms = ", ".join(f"{t} ×{n}" for t, n in top) or "nothing yet"
+        self.memory_var.set(f"Words it is learning: {terms}\nCorrections learned: "
+                            f"{m.corrections_learned} · Style examples: {len(m.style_examples)}")
+
+    def _forget(self) -> None:
+        if messagebox.askyesno(APP_NAME, "Delete all learned words and style examples?",
+                               parent=self.win):
+            self.app.forget_memory()
+            self.refresh_glossary()
 
     def _add_gloss(self) -> None:
         heard, written = self.heard_var.get().strip(), self.written_var.get().strip()

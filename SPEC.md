@@ -144,5 +144,23 @@ followed injected instructions. qwen2.5:3b was slower (1.35 s) and changed the s
 - J6: Traffic goes only to `127.0.0.1:11434`, so the network guard still counts 0 outbound requests.
   Ctrl+Alt+Z still restores the raw Whisper transcript.
 
+### K. Personal memory (improves with daily use, stored locally)
+Utter can't retrain Whisper on this laptop. Instead it learns three things, all stored locally in
+`%APPDATA%\Utter\personal.json`, visible in the dashboard and deletable with "Forget everything":
+- K1 (T): **Vocabulary.** From each inserted dictation, Utter collects candidate terms: words capitalised
+  mid-sentence, mixed-case or digit-bearing tokens, and words of ≥ 10 letters. A term seen ≥ 2 times
+  becomes a Whisper hotword. Glossary terms come first, and the whole list is capped at 40 terms.
+  Hotwords only bias recognition; they never replace text.
+- K2 (T): **Correction learning (Ctrl+Alt+L).** The user selects their corrected text in any app and presses
+  Ctrl+Alt+L. Utter copies the selection (restoring the clipboard afterwards) and word-diffs it against
+  the last inserted dictation. Replaced spans of 1–4 words become proposed `heard → written` glossary
+  entries, added only after the user confirms. If nothing differs, the pill says so.
+- K3 (T): **Style examples.** When a correction rephrases more than single words, the pair (inserted →
+  corrected) is kept as a style example. The 3 most recent are added to the AI polish as extra few-shot
+  examples, and at most 5 are stored.
+- K4 (T): A learning toggle (`learn_enabled`) and "Forget everything" (deletes personal.json data).
+  Audio is still never stored. personal.json holds only terms, counts and the correction pairs the
+  user taught it.
+
 ### Out of scope (roadmap)
 Local LLM rewriting, voice-editing of selected text, live partial transcripts, meeting capture, team sync, mobile.
