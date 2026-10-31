@@ -42,7 +42,8 @@ def is_confident(text: str, avg_logprob: float, no_speech_prob: float,
 
 
 class Transcriber:
-    def __init__(self, name: str, models_root: Path, beam_size: int = 1) -> None:
+    def __init__(self, name: str, models_root: Path, beam_size: int = 1,
+                 threads: int = 8) -> None:
         path = model_path(models_root, name)
         if not (path / "model.bin").exists():
             raise ModelMissingError(
@@ -53,7 +54,7 @@ class Transcriber:
         self.beam_size = beam_size
         self._model = WhisperModel(
             str(path), device="cpu", compute_type="int8",
-            cpu_threads=os.cpu_count() or 4, local_files_only=True,
+            cpu_threads=min(threads, os.cpu_count() or threads), local_files_only=True,
         )
         log.info("loaded model %s in %.2fs", name, time.perf_counter() - started)
 
@@ -70,6 +71,7 @@ class Transcriber:
             audio,
             language="en",
             beam_size=self.beam_size,
+            temperature=0.0,  # no retry loop: low confidence is refused instead (M1)
             vad_filter=True,
             condition_on_previous_text=False,
             without_timestamps=True,

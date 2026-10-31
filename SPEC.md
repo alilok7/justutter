@@ -182,5 +182,37 @@ installed, otherwise Segoe UI.
 - L5 (M): The learn-correction dialog matches the theme, showing the corrections in monospace with "Not now"
   and "Learn" buttons.
 
+### M. Speed (personal daily use; target is release-to-text of about 2–3 s regardless of length)
+Evidence (live log, 31 Oct): most dictations took 2.4–4.8 s. A 1.4 s clip took 5.5 s because Whisper retried at
+higher temperatures. With an image on the clipboard, text was typed out key by key. On this CPU, small.en
+costs about 1.5 s per pass whatever the clip length (the 30 s window is padded), and 8 threads beat 14.
+- M1 (T): Decoding uses temperature 0 only (no retry loop). Low-confidence results are still refused
+  (B4).
+- M2 (T): Whisper uses `whisper_threads` CPU threads (default 8). Configurable.
+- M3 (T): Long recordings are cut every ~12 s at a pause. Each piece is transcribed, cleaned and AI-polished in
+  the background while recording continues. On release, only the last piece is processed, then the
+  pieces are joined and mode formatting is applied once.
+- M4 (T): Paste snapshots the **whole** clipboard (every memory-based format, images and HTML included;
+  the GDI/OLE formats are skipped because Windows regenerates them). After pasting, the snapshot is
+  restored, but only if the clipboard sequence number is unchanged (meaning the user didn't copy
+  anything new). Text is typed out only if the snapshot fails.
+
+### N. Lists
+- N1 (T, E): Spoken sequences become a numbered list: "one, … two, … three, …" or "first, … second, …",
+  also as digits ("1. … 2. …"). A marker must be followed by punctuation, start at 1, run in order, and
+  have ≥ 2 items. Text before the list becomes an intro line ending in ":", and text after the last item's
+  sentence becomes a new line. This matches Wispr's documented behaviour ("one… two…" / "first…
+  second…").
+- N2 (T, E): "bullet point X" / "bullet X" starts a "- " bullet line.
+- N3 (T): A comma series inside a sentence ("shoes, bags and cars") stays inline, as written English
+  does.
+
+### O. Paste last transcription and saved history
+- O1 (T): **Alt+Shift+Z** pastes the most recent transcription into whatever is focused now (for when no
+  text box was focused while dictating). With no history, the bar says "Nothing yet".
+- O2 (T): Transcriptions (text only, never audio) are saved locally to `%APPDATA%\Utter\history.jsonl`
+  (last 500) and survive restarts. `save_history` (default on, at the user's request) and a
+  "Clear history" button control this. *(This updates C4: audio is still never stored.)*
+
 ### Out of scope (roadmap)
 Local LLM rewriting, voice-editing of selected text, live partial transcripts, meeting capture, team sync, mobile.

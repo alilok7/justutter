@@ -512,7 +512,8 @@ def main() -> int:
     guard = NetGuard()
     guard.install()
     try:
-        transcriber = Transcriber(settings.model, models_dir())
+        transcriber = Transcriber(settings.model, models_dir(),
+                                  threads=settings.whisper_threads)
     except ModelMissingError as exc:
         error_box(str(exc))
         return 1
