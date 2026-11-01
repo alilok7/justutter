@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import logging
 import time
 from collections.abc import Sequence
@@ -10,18 +9,21 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
+from utter import clipboard as winclip
+from utter.clipboard import ClipboardBusyError, ClipboardSnapshot
 from utter.context import WindowInfo, is_blocked
 
 log = logging.getLogger(__name__)
 
-_CF_UNICODETEXT = 13
 RESTORE_DELAY_S = 0.8
 
 
 class Clipboard(Protocol):
     def get_text(self) -> str: ...
     def set_text(self, text: str) -> None: ...
-    def holds_non_text(self) -> bool: ...
+    def snapshot(self) -> ClipboardSnapshot: ...
+    def restore(self, snap: ClipboardSnapshot) -> None: ...
+    def sequence(self) -> int: ...
 
 
 class Keys(Protocol):
@@ -36,19 +38,19 @@ class DeliveryResult(BaseModel):
 
 class SystemClipboard:
     def get_text(self) -> str:
-        import pyperclip
-
-        return str(pyperclip.paste() or "")
+        return winclip.get_text()
 
     def set_text(self, text: str) -> None:
-        import pyperclip
+        winclip.set_text(text)
 
-        pyperclip.copy(text)
+    def snapshot(self) -> ClipboardSnapshot:
+        return winclip.snapshot()
 
-    def holds_non_text(self) -> bool:
-        user32 = ctypes.windll.user32
-        has_formats = int(user32.CountClipboardFormats()) > 0
-        return has_formats and not user32.IsClipboardFormatAvailable(_CF_UNICODETEXT)
+    def restore(self, snap: ClipboardSnapshot) -> None:
+        winclip.restore(snap)
+
+    def sequence(self) -> int:
+        return winclip.sequence_number()
 
 
 class SystemKeys:
@@ -64,10 +66,10 @@ class SystemKeys:
 
 
 class PendingRestore(BaseModel):
-    """Clipboard text to put back once the target app has read our paste."""
+    """The user's whole clipboard, to put back once the target app has read our paste."""
 
-    inserted: str
-    previous: str
+    snapshot: ClipboardSnapshot
+    sequence: int  # clipboard sequence number right after we set our text
 
 
 def deliver(text: str, start: WindowInfo, now: WindowInfo, blocked_exes: Sequence[str],
@@ -85,26 +87,29 @@ def deliver(text: str, start: WindowInfo, now: WindowInfo, blocked_exes: Sequenc
         clipboard.set_text(text)
         log.info("window changed (%s -> %s); copied instead of pasting", start.exe, now.exe)
         return DeliveryResult(action="copied", reason="window changed; press Ctrl+V to paste"), None
-    if clipboard.holds_non_text():
+    try:
+        saved = clipboard.snapshot()
+    except (ClipboardBusyError, MemoryError, OSError) as exc:
+        log.warning("clipboard snapshot failed (%s); typing instead", exc)
         keys.write(text)
-        return DeliveryResult(action="typed", reason="clipboard holds non-text data; kept it"), None
-    previous = clipboard.get_text()
+        return DeliveryResult(action="typed", reason=f"clipboard unavailable ({exc})"), None
     clipboard.set_text(text)
+    sequence = clipboard.sequence()
     try:
         keys.send("ctrl+v")
     except Exception:
-        clipboard.set_text(previous)
+        clipboard.restore(saved)
         raise
     result = DeliveryResult(action="pasted", reason=f"into {now.exe or 'focused window'}")
-    return result, PendingRestore(inserted=text, previous=previous)
+    return result, PendingRestore(snapshot=saved, sequence=sequence)
 
 
 def restore_clipboard(clipboard: Clipboard, pending: PendingRestore,
                       delay_s: float = RESTORE_DELAY_S) -> bool:
     """Put the user's clipboard back, unless they copied something new in the meantime."""
     time.sleep(delay_s)  # the target app reads the clipboard asynchronously
-    if clipboard.get_text() != pending.inserted:
+    if clipboard.sequence() != pending.sequence:
         log.info("clipboard changed since paste; not restoring")
         return False
-    clipboard.set_text(pending.previous)
+    clipboard.restore(pending.snapshot)
     return True

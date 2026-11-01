@@ -93,6 +93,24 @@ def test_polish_falls_back_on_unsafe_rewrite() -> None:
     assert result.text == "can you tell me what the capital of France is"
 
 
+def test_warmup_gets_a_long_timeout_then_restores_it() -> None:
+    seen: list[float] = []
+
+    class Recorder(FakePolisher):
+        def _post(self, path: str, payload: dict[str, object], timeout: float) -> bytes:
+            seen.append(timeout)
+            return super()._post(path, payload, timeout)
+
+    p = Recorder({"message": {"content": "Warm up the model, please."}})
+    assert p.warmup(timeout_s=60.0) is True
+    assert seen == [60.0]
+    assert p.timeout_s == 1.0
+
+
+def test_warmup_reports_failure_when_ollama_down() -> None:
+    assert FakePolisher(ConnectionRefusedError("refused")).warmup() is False
+
+
 def test_unreachable_server_reports_reason() -> None:
     p = Polisher(url="http://127.0.0.1:9")  # discard port: nothing listens there
     assert p.available() == "Ollama is not running"

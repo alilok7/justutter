@@ -141,8 +141,18 @@ class Polisher:
             return f"model {self.model} not installed (run: ollama pull {self.model})"
         return None
 
-    def warmup(self) -> None:
-        self.polish("warm up the model please", ())
+    def warmup(self, timeout_s: float = 60.0) -> bool:
+        """Load the model into memory. The first load after a reboot can take tens of seconds,
+        far longer than the per-dictation timeout, so it gets its own budget."""
+        normal, self.timeout_s = self.timeout_s, timeout_s
+        try:
+            result = self.polish("warm up the model please", ())
+        finally:
+            self.timeout_s = normal
+        if not result.used and "unavailable" in result.reason:
+            log.warning("ai polish warm-up failed: %s", result.reason)
+            return False
+        return True
 
     def _messages(self, text: str) -> list[dict[str, str]]:
         msgs = [{"role": "system", "content": SYSTEM}]

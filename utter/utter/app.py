@@ -17,6 +17,7 @@ from PySide6.QtCore import QTimer
 from utter import APP_NAME
 from utter.audio import Recorder, find_split
 from utter.cleanup import clean, format_for_mode
+from utter.clipboard import ClipboardBusyError
 from utter.config import (
     GlossaryEntry,
     Mode,
@@ -377,7 +378,9 @@ class UtterApp:
         if problem:
             self.events.put(("notice", f"AI polish off: {problem}"))
             return
-        self.polisher.warmup()
+        if not self.polisher.warmup():
+            self.events.put(("notice", "AI polish off: model failed to load"))
+            return
         self.polisher_ready = True
         log.info("ai polish ready (%s)", self.polisher.model)
 
@@ -406,10 +409,11 @@ class UtterApp:
             return Outcome(state="warn", text="Learning is off", detail="turn it on in Memory")
         if not self.hotkeys.wait_for_release(["ctrl", "alt", "l"]):
             return Outcome(state="warn", text="Release Ctrl+Alt+L", detail="then try again")
-        if self.clipboard.holds_non_text():
-            return Outcome(state="warn", text="Clipboard holds an image",
-                           detail="copy some text first")
-        previous = self.clipboard.get_text()
+        try:
+            saved = self.clipboard.snapshot()
+        except (ClipboardBusyError, MemoryError, OSError) as exc:
+            log.warning("clipboard snapshot failed: %s", exc)
+            return Outcome(state="warn", text="Clipboard busy", detail="try again")
         marker = f"utter-selection-marker-{time.monotonic()}"
         self.clipboard.set_text(marker)
         try:
@@ -417,7 +421,7 @@ class UtterApp:
             time.sleep(0.3)
             selection = self.clipboard.get_text()
         finally:
-            self.clipboard.set_text(previous)
+            self.clipboard.restore(saved)
         if not selection.strip() or selection == marker:
             return Outcome(state="warn", text="Nothing selected",
                            detail="select your corrected text, then Ctrl+Alt+L")

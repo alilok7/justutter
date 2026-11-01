@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from utter.audio import resample
+from utter.clipboard import ClipboardBusyError, ClipboardSnapshot
 from utter.config import Mode, Settings
 from utter.context import WindowInfo, categorize, is_blocked
 from utter.history import History, Stats, iso_week
@@ -17,21 +18,50 @@ def win(hwnd: int = 1, exe: str = "notepad.exe", title: str = "Untitled - Notepa
     return WindowInfo(hwnd=hwnd, pid=10, exe=exe, title=title)
 
 
+CF_DIB = 8
+
+
 class FakeClipboard:
-    def __init__(self, text: str = "user's copied text", non_text: bool = False) -> None:
-        self.text = text
-        self.non_text = non_text
+    """Holds clipboard 'formats' like the real one: text and/or an image."""
+
+    def __init__(self, text: str = "user's copied text", image: bytes | None = None,
+                 busy: bool = False) -> None:
+        self.items: list[tuple[int, bytes]] = []
+        if text:
+            self.items.append((13, text.encode("utf-16-le")))
+        if image is not None:
+            self.items.append((CF_DIB, image))
+        self.busy = busy
+        self.seq = 1
         self.history: list[str] = []
+
+    @property
+    def text(self) -> str:
+        return next((d.decode("utf-16-le") for f, d in self.items if f == 13), "")
 
     def get_text(self) -> str:
         return self.text
 
     def set_text(self, text: str) -> None:
-        self.text = text
+        self.items = [(13, text.encode("utf-16-le"))]
+        self.seq += 1
         self.history.append(text)
 
-    def holds_non_text(self) -> bool:
-        return self.non_text
+    def snapshot(self) -> ClipboardSnapshot:
+        if self.busy:
+            raise ClipboardBusyError("held by another app")
+        return ClipboardSnapshot(items=list(self.items))
+
+    def restore(self, snap: ClipboardSnapshot) -> None:
+        self.items = list(snap.items)
+        self.seq += 1
+
+    def sequence(self) -> int:
+        return self.seq
+
+    def user_copies(self, text: str) -> None:
+        self.items = [(13, text.encode("utf-16-le"))]
+        self.seq += 1
 
 
 class FakeKeys:
@@ -64,7 +94,7 @@ def test_restore_skipped_if_user_copied_something_new() -> None:
     cb = FakeClipboard()
     _, pending = deliver("Hello", win(), win(), BLOCKED, cb, FakeKeys(cb))
     assert pending is not None
-    cb.text = "something the user just copied"
+    cb.user_copies("something the user just copied")
     assert restore_clipboard(cb, pending, delay_s=0) is False
     assert cb.text == "something the user just copied"
 
@@ -90,8 +120,20 @@ def test_window_changed_copies_instead() -> None:
     assert cb.text == "Hello"
 
 
-def test_non_text_clipboard_is_typed_and_untouched() -> None:
-    cb = FakeClipboard(text="", non_text=True)
+def test_image_on_clipboard_is_pasted_over_and_restored() -> None:
+    image = b"BITMAPINFOHEADER-and-pixels"
+    cb = FakeClipboard(text="", image=image)
+    keys = FakeKeys(cb)
+    result, pending = deliver("Hello", win(), win(), BLOCKED, cb, keys)
+    assert result.action == "pasted"  # no slow key-by-key typing any more
+    assert keys.pasted == ["Hello"] and keys.typed == []
+    assert pending is not None
+    restore_clipboard(cb, pending, delay_s=0)
+    assert cb.items == [(CF_DIB, image)]
+
+
+def test_busy_clipboard_falls_back_to_typing() -> None:
+    cb = FakeClipboard(busy=True)
     keys = FakeKeys(cb)
     result, pending = deliver("Hello", win(), win(), BLOCKED, cb, keys)
     assert result.action == "typed"
