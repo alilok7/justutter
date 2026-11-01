@@ -16,6 +16,7 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel, ValidationError
 
+from utter.cleanup import has_list
 from utter.config import Mode
 
 log = logging.getLogger(__name__)
@@ -82,8 +83,8 @@ class _OllamaReply(BaseModel):
 
 
 def should_polish(text: str, mode: Mode, min_words: int) -> bool:
-    if mode is Mode.DEV or not text.strip():
-        return False
+    if mode is Mode.DEV or not text.strip() or has_list(text):
+        return False  # code stays verbatim; lists keep the layout the rules produced
     return len(text.split()) >= min_words or bool(_CUES.search(text))
 
 

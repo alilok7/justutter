@@ -44,6 +44,9 @@ def cmd_eval(names: Sequence[str]) -> int:
     from utter.netguard import NetGuard
     from utter.transcriber import ModelMissingError, Transcriber
 
+    from utter.power import keep_full_speed
+
+    keep_full_speed()  # measure the speed the app actually gets
     settings, _ = load_settings()
     guard = NetGuard()
     guard.install()

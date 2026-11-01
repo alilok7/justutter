@@ -35,6 +35,22 @@ _BACKTRACK_RE = re.compile(r"[ \t]*[,;]?[ \t]*\bscratch that\b[ \t]*[,.;:!?]?[ \
                            re.IGNORECASE)
 _BOUNDARY_CHARS = ".!?\n,;"
 
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+    "nine": 9, "ten": 10, "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+    "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+}
+# A list marker must be followed by punctuation ("one, shoes" / "1. shoes"), which keeps
+# ordinary prose like "two or three ideas" and decimals like "1.5" out of lists.
+_MARKER_RE = re.compile(
+    r"(?:^|(?<=[\s.,;:!?]))(?:number\s+)?("
+    + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True))
+    + r"|\d{1,2})\s*[.,:)]\s+",
+    re.IGNORECASE,
+)
+_BULLET_RE = re.compile(r"[ \t]*\b(?:bullet point|bullet)\b[ \t]*[,.:;]?[ \t]*", re.IGNORECASE)
+_LIST_LINE_RE = re.compile(r"(?m)^(?:\d{1,2}\.|-) ")
+
 # Placeholders protect inserted text (snippets, glossary terms) from later casing/tidy steps.
 _PH = "\x00{}\x00"
 _PH_RE = re.compile("\x00(\\d+)\x00")
@@ -72,6 +88,65 @@ def _apply_commands(text: str, rules: list[str]) -> str:
     if n_line:
         rules.append(f"command: new line x{n_line}")
     return text
+
+
+def _marker_value(word: str) -> int:
+    return int(word) if word.isdigit() else _NUMBER_WORDS[word.lower()]
+
+
+def _capitalise(item: str) -> str:
+    return item[:1].upper() + item[1:]
+
+
+def _apply_numbered_list(text: str, rules: list[str]) -> str:
+    taken: list[re.Match[str]] = []
+    for m in _MARKER_RE.finditer(text):
+        if _marker_value(m.group(1)) == len(taken) + 1:
+            taken.append(m)
+    if len(taken) < 2:
+        return text
+    intro = text[: taken[0].start()].strip().rstrip(",;:.-").strip()
+    items: list[str] = []
+    trailing = ""
+    for i, m in enumerate(taken):
+        end = taken[i + 1].start() if i + 1 < len(taken) else len(text)
+        item = text[m.end():end].strip()
+        if i == len(taken) - 1:  # text after the last item's sentence is not part of the list
+            stop = re.search(r"[.!?]\s+(?=\S)", item)
+            if stop:
+                trailing, item = item[stop.end():].strip(), item[: stop.start()]
+        item = item.strip().rstrip(",;:.").strip()
+        if item:
+            items.append(_capitalise(item))
+    if len(items) < 2:
+        return text
+    lines = [f"{n}. {item}" for n, item in enumerate(items, 1)]
+    head = f"{intro}{'' if intro[-1:] in (':', '?') else ':'}\n" if intro else ""
+    rules.append(f"list: {len(items)} numbered items")
+    return head + "\n".join(lines) + (f"\n{trailing}" if trailing else "")
+
+
+def _apply_bullets(text: str, rules: list[str]) -> str:
+    text, count = _BULLET_RE.subn("\n- ", text)
+    if not count:
+        return text
+    lines = []
+    for line in text.split("\n"):
+        if line.startswith("- "):
+            line = "- " + _capitalise(line[2:].strip().rstrip(",;.").strip())
+        lines.append(line.rstrip(" ,;:") if not line.startswith("- ") else line)
+    rules.append(f"list: {count} bullet items")
+    return "\n".join(lines).strip("\n")
+
+
+def _apply_lists(text: str, rules: list[str]) -> str:
+    text = _apply_bullets(text, rules)
+    return "\n\n".join(block if has_list(block) else _apply_numbered_list(block, rules)
+                       for block in text.split("\n\n"))
+
+
+def has_list(text: str) -> bool:
+    return bool(_LIST_LINE_RE.search(text))
 
 
 def _apply_backtrack(text: str, rules: list[str]) -> str:
@@ -149,7 +224,8 @@ def _apply_mode(text: str, mode: Mode, rules: list[str]) -> str:
     if mode is Mode.CHAT and text.endswith(".") and not text.endswith(".."):
         rules.append("mode chat: removed trailing period")
         text = text[:-1]
-    elif mode is Mode.EMAIL and text and text[-1] not in ".!?:\x00":
+    elif mode is Mode.EMAIL and text and text[-1] not in ".!?:\x00" \
+            and not _LIST_LINE_RE.match(text.rsplit("\n", 1)[-1]):
         rules.append("mode email: added final period")
         text += "."
     return text
@@ -177,6 +253,7 @@ def clean(raw: str, mode: Mode, glossary: Sequence[GlossaryEntry] = (),
     text = " ".join(raw.replace("\x00", "").split(" ")).strip()
     text = _apply_snippets(text, snippets, protected, rules)
     text = _apply_commands(text, rules)
+    text = _apply_lists(text, rules)
     text = _apply_backtrack(text, rules)
     text = _apply_fillers(text, rules)
     text = _apply_glossary(text, glossary, protected, rules)

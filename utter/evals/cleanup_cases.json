@@ -1,28 +1,224 @@
 [
-  {"id": "filler-leading", "mode": "default", "raw": "Um, so we should ship it today.", "expected": "So we should ship it today."},
-  {"id": "filler-middle", "mode": "default", "raw": "We should, uh, go with the second option.", "expected": "We should go with the second option."},
-  {"id": "filler-many", "mode": "default", "raw": "Uh, hmm, I think, um, the demo works.", "expected": "I think the demo works."},
-  {"id": "filler-keeps-like", "mode": "default", "raw": "I like the idea, you know.", "expected": "I like the idea, you know."},
-  {"id": "new-line", "mode": "default", "raw": "Hi team. New line. The review is at three.", "expected": "Hi team.\nThe review is at three."},
-  {"id": "new-paragraph", "mode": "default", "raw": "Thanks for coming. New paragraph. Next steps are below.", "expected": "Thanks for coming.\n\nNext steps are below."},
-  {"id": "start-new-paragraph", "mode": "default", "raw": "First point done, start a new paragraph, second point.", "expected": "First point done,\n\nSecond point."},
-  {"id": "line-break-lowercase", "mode": "default", "raw": "Shopping list line break eggs line break milk", "expected": "Shopping list\nEggs\nMilk"},
-  {"id": "backtrack-clause", "mode": "default", "raw": "Hi team, the meeting is at two, scratch that, the meeting is at three.", "expected": "Hi team, the meeting is at three."},
-  {"id": "backtrack-sentence", "mode": "default", "raw": "I'll bring cookies. Scratch that. I'll bring cake.", "expected": "I'll bring cake."},
-  {"id": "backtrack-start", "mode": "default", "raw": "Send it now scratch that wait until Monday.", "expected": "Wait until Monday."},
-  {"id": "backtrack-only", "mode": "default", "raw": "Scratch that.", "expected": ""},
-  {"id": "glossary-multiword", "mode": "default", "raw": "We tested the Mera Lion model at NUS.", "expected": "We tested the MERaLiON model at NUS."},
-  {"id": "glossary-spaced-letters", "mode": "default", "raw": "I study at N U S.", "expected": "I study at NUS."},
-  {"id": "glossary-dotted", "mode": "default", "raw": "The N.U.S. Hackers event", "expected": "The NUS Hackers event"},
-  {"id": "glossary-hyphen", "mode": "default", "raw": "Push it to git-hub tonight.", "expected": "Push it to GitHub tonight."},
-  {"id": "snippet", "mode": "default", "raw": "You can reach me at insert my email.", "expected": "You can reach me at hello@example.com."},
-  {"id": "snippet-multiline", "mode": "email", "raw": "See you then. Insert sign off", "expected": "See you then. Best regards,\nThe Utter team"},
-  {"id": "chat-trailing-period", "mode": "chat", "raw": "Sounds good, see you at five.", "expected": "Sounds good, see you at five"},
-  {"id": "chat-keeps-question", "mode": "chat", "raw": "Are we still on for lunch?", "expected": "Are we still on for lunch?"},
-  {"id": "chat-keeps-ellipsis", "mode": "chat", "raw": "Well...", "expected": "Well..."},
-  {"id": "email-adds-period", "mode": "email", "raw": "hi professor tan I will submit the report tomorrow", "expected": "Hi professor tan I will submit the report tomorrow."},
-  {"id": "dev-no-casing", "mode": "dev", "raw": "fix the null check in the parser.", "expected": "fix the null check in the parser"},
-  {"id": "dev-keeps-url", "mode": "dev", "raw": "see http://localhost:8080/api for details", "expected": "see http://localhost:8080/api for details"},
-  {"id": "numbers-kept", "mode": "default", "raw": "It costs 1,000 dollars, um, roughly.", "expected": "It costs 1,000 dollars roughly."},
-  {"id": "combined", "mode": "email", "raw": "Um, hi team, the Mera Lion demo is at two, scratch that, at three. New paragraph. Insert sign off", "expected": "Hi team, at three.\n\nBest regards,\nThe Utter team"}
+  {
+    "id": "filler-leading",
+    "mode": "default",
+    "raw": "Um, so we should ship it today.",
+    "expected": "So we should ship it today."
+  },
+  {
+    "id": "filler-middle",
+    "mode": "default",
+    "raw": "We should, uh, go with the second option.",
+    "expected": "We should go with the second option."
+  },
+  {
+    "id": "filler-many",
+    "mode": "default",
+    "raw": "Uh, hmm, I think, um, the demo works.",
+    "expected": "I think the demo works."
+  },
+  {
+    "id": "filler-keeps-like",
+    "mode": "default",
+    "raw": "I like the idea, you know.",
+    "expected": "I like the idea, you know."
+  },
+  {
+    "id": "new-line",
+    "mode": "default",
+    "raw": "Hi team. New line. The review is at three.",
+    "expected": "Hi team.\nThe review is at three."
+  },
+  {
+    "id": "new-paragraph",
+    "mode": "default",
+    "raw": "Thanks for coming. New paragraph. Next steps are below.",
+    "expected": "Thanks for coming.\n\nNext steps are below."
+  },
+  {
+    "id": "start-new-paragraph",
+    "mode": "default",
+    "raw": "First point done, start a new paragraph, second point.",
+    "expected": "First point done,\n\nSecond point."
+  },
+  {
+    "id": "line-break-lowercase",
+    "mode": "default",
+    "raw": "Shopping list line break eggs line break milk",
+    "expected": "Shopping list\nEggs\nMilk"
+  },
+  {
+    "id": "backtrack-clause",
+    "mode": "default",
+    "raw": "Hi team, the meeting is at two, scratch that, the meeting is at three.",
+    "expected": "Hi team, the meeting is at three."
+  },
+  {
+    "id": "backtrack-sentence",
+    "mode": "default",
+    "raw": "I'll bring cookies. Scratch that. I'll bring cake.",
+    "expected": "I'll bring cake."
+  },
+  {
+    "id": "backtrack-start",
+    "mode": "default",
+    "raw": "Send it now scratch that wait until Monday.",
+    "expected": "Wait until Monday."
+  },
+  {
+    "id": "backtrack-only",
+    "mode": "default",
+    "raw": "Scratch that.",
+    "expected": ""
+  },
+  {
+    "id": "glossary-multiword",
+    "mode": "default",
+    "raw": "We tested the Mera Lion model at NUS.",
+    "expected": "We tested the MERaLiON model at NUS."
+  },
+  {
+    "id": "glossary-spaced-letters",
+    "mode": "default",
+    "raw": "I study at N U S.",
+    "expected": "I study at NUS."
+  },
+  {
+    "id": "glossary-dotted",
+    "mode": "default",
+    "raw": "The N.U.S. Hackers event",
+    "expected": "The NUS Hackers event"
+  },
+  {
+    "id": "glossary-hyphen",
+    "mode": "default",
+    "raw": "Push it to git-hub tonight.",
+    "expected": "Push it to GitHub tonight."
+  },
+  {
+    "id": "snippet",
+    "mode": "default",
+    "raw": "You can reach me at insert my email.",
+    "expected": "You can reach me at hello@example.com."
+  },
+  {
+    "id": "snippet-multiline",
+    "mode": "email",
+    "raw": "See you then. Insert sign off",
+    "expected": "See you then. Best regards,\nThe Utter team"
+  },
+  {
+    "id": "chat-trailing-period",
+    "mode": "chat",
+    "raw": "Sounds good, see you at five.",
+    "expected": "Sounds good, see you at five"
+  },
+  {
+    "id": "chat-keeps-question",
+    "mode": "chat",
+    "raw": "Are we still on for lunch?",
+    "expected": "Are we still on for lunch?"
+  },
+  {
+    "id": "chat-keeps-ellipsis",
+    "mode": "chat",
+    "raw": "Well...",
+    "expected": "Well..."
+  },
+  {
+    "id": "email-adds-period",
+    "mode": "email",
+    "raw": "hi professor tan I will submit the report tomorrow",
+    "expected": "Hi professor tan I will submit the report tomorrow."
+  },
+  {
+    "id": "dev-no-casing",
+    "mode": "dev",
+    "raw": "fix the null check in the parser.",
+    "expected": "fix the null check in the parser"
+  },
+  {
+    "id": "dev-keeps-url",
+    "mode": "dev",
+    "raw": "see http://localhost:8080/api for details",
+    "expected": "see http://localhost:8080/api for details"
+  },
+  {
+    "id": "numbers-kept",
+    "mode": "default",
+    "raw": "It costs 1,000 dollars, um, roughly.",
+    "expected": "It costs 1,000 dollars roughly."
+  },
+  {
+    "id": "combined",
+    "mode": "email",
+    "raw": "Um, hi team, the Mera Lion demo is at two, scratch that, at three. New paragraph. Insert sign off",
+    "expected": "Hi team, at three.\n\nBest regards,\nThe Utter team"
+  },
+  {
+    "id": "list-words",
+    "mode": "default",
+    "raw": "Things to buy, one, shoes. Two, bags. Three, cars.",
+    "expected": "Things to buy:\n1. Shoes\n2. Bags\n3. Cars"
+  },
+  {
+    "id": "list-commas",
+    "mode": "default",
+    "raw": "I need to pack one, passport, two, charger, three, snacks",
+    "expected": "I need to pack:\n1. Passport\n2. Charger\n3. Snacks"
+  },
+  {
+    "id": "list-ordinals",
+    "mode": "default",
+    "raw": "First, book the room. Second, send the invite. Third, order lunch.",
+    "expected": "1. Book the room\n2. Send the invite\n3. Order lunch"
+  },
+  {
+    "id": "list-digits",
+    "mode": "default",
+    "raw": "My goals are 1. ship the app 2. write docs 3. rest.",
+    "expected": "My goals are:\n1. Ship the app\n2. Write docs\n3. Rest"
+  },
+  {
+    "id": "list-trailing-text",
+    "mode": "default",
+    "raw": "Agenda one, budget. Two, hiring. That's all for today.",
+    "expected": "Agenda:\n1. Budget\n2. Hiring\nThat's all for today."
+  },
+  {
+    "id": "list-email-no-final-period",
+    "mode": "email",
+    "raw": "Hi team, the plan is one, design. Two, build.",
+    "expected": "Hi team, the plan is:\n1. Design\n2. Build"
+  },
+  {
+    "id": "list-bullets",
+    "mode": "default",
+    "raw": "Packing list bullet point passport bullet point charger bullet point snacks",
+    "expected": "Packing list\n- Passport\n- Charger\n- Snacks"
+  },
+  {
+    "id": "inline-series-stays-inline",
+    "mode": "default",
+    "raw": "I bought shoes, bags and cars yesterday.",
+    "expected": "I bought shoes, bags and cars yesterday."
+  },
+  {
+    "id": "no-false-list",
+    "mode": "default",
+    "raw": "I have two, maybe three ideas.",
+    "expected": "I have two, maybe three ideas."
+  },
+  {
+    "id": "decimals-not-a-list",
+    "mode": "default",
+    "raw": "The score went from 1.5 to 2.5 overall.",
+    "expected": "The score went from 1.5 to 2.5 overall."
+  },
+  {
+    "id": "money-not-a-list",
+    "mode": "default",
+    "raw": "It costs 1,000 dollars and 2,000 later.",
+    "expected": "It costs 1,000 dollars and 2,000 later."
+  }
 ]
