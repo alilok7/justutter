@@ -42,9 +42,8 @@ def cmd_download(names: Sequence[str]) -> int:
 def cmd_eval(names: Sequence[str]) -> int:
     from utter.evaluate import EVALS_DIR, run_model, summarise, to_markdown
     from utter.netguard import NetGuard
-    from utter.transcriber import ModelMissingError, Transcriber
-
     from utter.power import keep_full_speed
+    from utter.transcriber import ModelMissingError, Transcriber
 
     keep_full_speed()  # measure the speed the app actually gets
     settings, _ = load_settings()
