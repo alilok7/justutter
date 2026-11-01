@@ -57,6 +57,19 @@ _FUNCTION_WORDS = frozenset({
 })
 
 
+_FILLER_WORDS = frozenset({"um", "uh", "erm", "er", "hmm", "uhm", "umm"})
+
+
+def _core_words(words: list[str]) -> list[str]:
+    """Words minus fillers and immediate repeats ("we we", "probably uh probably")."""
+    core: list[str] = []
+    for w in words:
+        if w in _FILLER_WORDS or (core and core[-1] == w):
+            continue
+        core.append(w)
+    return core
+
+
 def _is_question(text: str) -> bool:
     return text.rstrip().endswith("?") or bool(_QUESTION_START.match(text))
 
@@ -100,7 +113,8 @@ def validate(before: str, after: str, protected: Sequence[str] = ()) -> str | No
     if "```" in after or "<dictation" in after.lower() or "</" in after:
         return "output contains code or tags"
     b, a = _words(before), _words(after)
-    if len(b) >= 4 and not MIN_LENGTH_RATIO <= len(a) / len(b) <= 1.5:
+    core = _core_words(b)  # removing stutters and fillers is the job, so don't count them
+    if len(core) >= 4 and not MIN_LENGTH_RATIO <= len(a) / len(core) <= 1.5:
         return f"length changed too much ({len(b)} -> {len(a)} words)"
     if _is_question(before) and not after.rstrip().endswith("?"):
         return "question was not kept as a question (possible answer)"

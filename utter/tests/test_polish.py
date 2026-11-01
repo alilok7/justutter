@@ -43,6 +43,11 @@ def test_validate_rejects(after: str, reason: str) -> None:
     assert result is not None and reason in result
 
 
+def test_validate_allows_removing_stutters_and_fillers() -> None:
+    before = "I I think we we should probably uh probably ship it on on Monday."
+    assert validate(before, "I think we should probably ship it on Monday.") is None
+
+
 def test_validate_rejects_rewrite_that_drops_a_third() -> None:
     before = "we should ship the new build to the beta testers on friday after lunch"
     after = "Ship the build to testers on Friday."
