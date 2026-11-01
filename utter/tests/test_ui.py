@@ -124,7 +124,7 @@ def fake_app() -> Any:
         set_learning=lambda v: calls["learn"].append(v),
         set_paused=lambda v: calls["paused"].append(v),
         add_glossary=lambda h, w: calls["added"].append((h, w)),
-        remove_glossary=lambda i: None, forget_memory=lambda: None,
+        remove_glossary=lambda i: None, forget_memory=lambda: None, clear_history=lambda: None,
         quit=lambda: None, toggle_dashboard=lambda: None,
     )
 

@@ -113,6 +113,8 @@ class Settings(BaseModel):
     bar_scale: float = Field(default=0.5, ge=0.3, le=1.5)
     learn_enabled: bool = True
     correction_hotkey: str = "ctrl+alt+l"
+    paste_last_hotkey: str = "alt+shift+z"
+    save_history: bool = True
     polish_enabled: bool = True
     polish_model: str = Field(default="qwen2.5:1.5b", min_length=1)
     polish_timeout_s: float = Field(default=2.5, gt=0.0, le=30.0)

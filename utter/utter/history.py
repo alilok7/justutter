@@ -1,4 +1,4 @@
-"""Recent dictations (memory only, text only) and weekly word stats (numbers only, on disk)."""
+"""Recent dictations (text only, optionally saved locally) and weekly word stats (numbers only)."""
 
 from __future__ import annotations
 
@@ -27,11 +27,46 @@ class Dictation(BaseModel):
 
 
 class History:
-    def __init__(self, size: int = 20) -> None:
+    """Most recent dictations, newest last. With a ``path`` they are kept in a local JSON-lines
+    file (text only, never audio) so they survive restarts."""
+
+    def __init__(self, size: int = 20, path: Path | None = None) -> None:
         self._items: deque[Dictation] = deque(maxlen=size)
+        self.path = path
+        if path is not None and path.exists():
+            self._load(path, size)
+
+    def _load(self, path: Path, size: int) -> None:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        bad = 0
+        for line in lines[-size:]:
+            try:
+                self._items.append(Dictation.model_validate_json(line))
+            except ValidationError:
+                bad += 1
+        if bad:
+            log.warning("skipped %d unreadable history lines in %s", bad, path)
+        if len(lines) > size or bad:
+            self._rewrite()
+
+    def _rewrite(self) -> None:
+        if self.path is None:
+            return
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text("".join(d.model_dump_json() + "\n" for d in self._items), encoding="utf-8")
+        tmp.replace(self.path)
 
     def add(self, item: Dictation) -> None:
         self._items.append(item)
+        if self.path is not None:
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(item.model_dump_json() + "\n")
+
+    def clear(self) -> None:
+        self._items.clear()
+        if self.path is not None and self.path.exists():
+            self.path.unlink()
+        log.info("history cleared")
 
     def last(self) -> Dictation | None:
         return self._items[-1] if self._items else None

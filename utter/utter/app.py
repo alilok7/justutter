@@ -106,6 +106,9 @@ class Job(BaseModel, arbitrary_types_allowed=True):
     session: Session | None = None
 
 
+WorkItem = Job | ChunkJob | Literal["undo", "learn", "paste_last"] | None
+
+
 class Outcome(BaseModel):
     state: Literal["done", "warn", "error", "cancelled"]
     text: str
@@ -121,7 +124,7 @@ class UtterApp:
         self.guard = guard
         self.config_dir = str(app_dir())
         self.events: queue.Queue[tuple[str, Any]] = queue.Queue()
-        self.jobs: queue.Queue[Job | ChunkJob | Literal["undo", "learn"] | None] = queue.Queue()
+        self.jobs: queue.Queue[WorkItem] = queue.Queue()
         self.memory_path = app_dir() / "personal.json"
         self.memory = load_memory(self.memory_path)
         self._memory_lock = threading.Lock()
@@ -131,7 +134,8 @@ class UtterApp:
         self.polisher_ready = False
         self._polish_warned = False
         self.recorder = Recorder()
-        self.history = History()
+        self.history = History(size=500, path=app_dir() / "history.jsonl"
+                               if settings.save_history else None)
         self.stats_path = app_dir() / "stats.json"
         self.stats = load_stats(self.stats_path)
         self.clipboard = SystemClipboard()
@@ -144,7 +148,7 @@ class UtterApp:
         self.hotkeys = HotkeyListener(
             settings.hotkey, self.events,
             {"undo": settings.undo_hotkey, "dashboard": settings.dashboard_hotkey,
-             "learn": settings.correction_hotkey},
+             "learn": settings.correction_hotkey, "paste_last": settings.paste_last_hotkey},
         )
         self.paused = False
         self.qt = make_app()
@@ -276,6 +280,8 @@ class UtterApp:
             if self._recording_since is None:
                 self.pill.set("warn", "Heads up", str(payload), revert_ms=4000)
             log.info("notice: %s", payload)
+        elif kind == "paste_last":
+            self.jobs.put("paste_last")
         elif kind == "learn":
             self.jobs.put("learn")
         elif kind == "confirm_learn":
@@ -304,6 +310,8 @@ class UtterApp:
             try:
                 if job == "undo":
                     outcome = self._undo()
+                elif job == "paste_last":
+                    outcome = self._paste_last()
                 elif job == "learn":
                     outcome = self._learn_from_selection()
                 else:
@@ -490,6 +498,25 @@ class UtterApp:
             self.memory = PersonalMemory()
             save_memory(self.memory, self.memory_path)
         log.info("personal memory cleared by user")
+
+    def _paste_last(self) -> Outcome:
+        """Alt+Shift+Z: paste the latest transcription wherever the cursor is now."""
+        last = self.history.last()
+        if last is None or not last.clean:
+            return Outcome(state="warn", text="Nothing yet", detail="dictate something first")
+        keys = [k.strip() for k in self.settings.paste_last_hotkey.split("+")]
+        if not self.hotkeys.wait_for_release(keys):
+            return Outcome(state="warn", text="Release the keys", detail="then try again")
+        now = foreground_window()
+        result, self._pending_restore = deliver(last.clean, now, now, self.settings.blocked_exes,
+                                                self.clipboard, self.keys)
+        log.info("paste last transcription: %s", result.action)
+        if result.action != "pasted":
+            return Outcome(state="warn", text=result.action.title(), detail=result.reason)
+        return Outcome(state="done", text="Pasted last")
+
+    def clear_history(self) -> None:
+        self.history.clear()
 
     def _undo(self) -> Outcome:
         last = self.history.last()

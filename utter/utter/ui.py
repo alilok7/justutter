@@ -644,7 +644,12 @@ class Dashboard(QWidget):
         learn.clicked.connect(self._learn)
         buttons.addWidget(learn)
         buttons.addStretch(1)
+        clear = QPushButton("Clear history")
+        clear.clicked.connect(self._clear_history)
+        buttons.addWidget(clear)
         right.addLayout(buttons)
+        right.addWidget(label("Saved on this PC only (history.jsonl, text only, never audio). "
+                              "Alt+Shift+Z pastes the latest one anywhere.", FAINT, 9, wrap=True))
         lay.addLayout(right, 1)
         return page
 
@@ -670,6 +675,15 @@ class Dashboard(QWidget):
         changes = "; ".join(d.rules) or "no changes"
         self.rules.setText(f"{d.app or '?'} · {d.mode.value} · {d.action} · {d.latency_s:.2f}s\n"
                            f"Changes: {changes}")
+
+    def _clear_history(self) -> None:
+        answer = QMessageBox.question(self, APP_NAME, "Delete all saved transcriptions?")
+        if answer == QMessageBox.StandardButton.Yes:
+            self.app.clear_history()
+            self.raw_text.clear()
+            self.clean_text.clear()
+            self.rules.clear()
+            self.refresh_history()
 
     def _copy(self, widget: QTextEdit) -> None:
         clip = QApplication.clipboard()
@@ -843,6 +857,7 @@ class Dashboard(QWidget):
             ("Hands-free", f"{chord}+Space · finish with {chord} · Esc cancels"),
             ("Undo AI edit", cfg.undo_hotkey.title()),
             ("Learn correction", cfg.correction_hotkey.title()),
+            ("Paste last transcription", cfg.paste_last_hotkey.title()),
             ("Dashboard", cfg.dashboard_hotkey.title()),
             ("Speech model", f"Whisper {cfg.model} (CPU, offline)"),
             ("AI polish model", f"{cfg.polish_model} via Ollama on 127.0.0.1"),
