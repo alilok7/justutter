@@ -197,6 +197,11 @@ costs about 1.5 s per pass whatever the clip length (the 30 s window is padded),
   restored, but only if the clipboard sequence number is unchanged (meaning the user didn't copy
   anything new). Text is typed out only if the snapshot fails.
 
+- M5 (T): On startup the process opts out of Windows power throttling (EcoQoS) for execution
+  speed and runs at above-normal priority. Evidence (2 Nov, on battery): Whisper median went from
+  3.53 s throttled to 1.59 s, the same as on AC power. A 46 s dictation dropped from 10.3 s to 4.0 s
+  release-to-text with M3, measured while throttled.
+
 ### N. Lists
 - N1 (T, E): Spoken sequences become a numbered list: "one, … two, … three, …" or "first, … second, …",
   also as digits ("1. … 2. …"). A marker must be followed by punctuation, start at 1, run in order, and

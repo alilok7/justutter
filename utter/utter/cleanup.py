@@ -155,14 +155,23 @@ def _apply_mode(text: str, mode: Mode, rules: list[str]) -> str:
     return text
 
 
-def format_for_mode(text: str, mode: Mode) -> tuple[str, list[str]]:
-    """Re-apply per-mode formatting, e.g. after the AI polish rewrote the text."""
+def format_for_mode(text: str, mode: Mode,
+                    keep_endings: Sequence[str] = ()) -> tuple[str, list[str]]:
+    """Apply per-mode formatting once to the finished text (after joining pieces and AI polish).
+
+    Text that ends with one of ``keep_endings`` (snippet texts) keeps its ending as written.
+    """
     rules: list[str] = []
-    return _apply_mode(text.strip(), mode, rules), rules
+    text = text.strip()
+    if any(e.strip() and text.endswith(e.strip()) for e in keep_endings):
+        return (text if mode is Mode.DEV else _sentence_case(text)), rules
+    return _apply_mode(text, mode, rules), rules
 
 
 def clean(raw: str, mode: Mode, glossary: Sequence[GlossaryEntry] = (),
-          snippets: Sequence[Snippet] = ()) -> CleanResult:
+          snippets: Sequence[Snippet] = (), apply_mode: bool = True) -> CleanResult:
+    """Clean a transcript. With ``apply_mode=False`` (one piece of a longer dictation) the
+    mode's end-of-text rules are left for ``format_for_mode`` so pieces join correctly."""
     rules: list[str] = []
     protected: list[str] = []
     text = " ".join(raw.replace("\x00", "").split(" ")).strip()
@@ -172,6 +181,9 @@ def clean(raw: str, mode: Mode, glossary: Sequence[GlossaryEntry] = (),
     text = _apply_fillers(text, rules)
     text = _apply_glossary(text, glossary, protected, rules)
     text = _tidy(text)
-    text = _apply_mode(text, mode, rules)
+    if apply_mode:
+        text = _apply_mode(text, mode, rules)
+    elif mode is not Mode.DEV:
+        text = _sentence_case(text)
     text = _PH_RE.sub(lambda m: protected[int(m.group(1))], text)
     return CleanResult(raw=raw, clean=text.strip(), mode=mode, applied_rules=rules)

@@ -7,6 +7,7 @@ import logging
 import queue
 import threading
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Literal
 
@@ -43,6 +44,7 @@ from utter.personal import (
     save_memory,
 )
 from utter.polish import Polisher, should_polish
+from utter.power import keep_full_speed
 from utter.transcriber import SAMPLE_RATE, ModelMissingError, Transcriber
 from utter.ui import Dashboard, FloatingBar, Tray, confirm_learn, error_box, make_app
 
@@ -52,17 +54,42 @@ _ERROR_ALREADY_EXISTS = 183
 _mutex: Any = None
 
 
-CHUNK_S = 20.0  # long recordings are transcribed in chunks of about this length while recording
+CHUNK_S = 12.0  # long recordings are processed in pieces of about this length while recording
+
+
+class Piece(BaseModel):
+    """One processed stretch of a recording: what Whisper heard and the finished text."""
+
+    raw: str
+    text: str
+    rules: list[str]
+
+
+def assemble_pieces(pieces: Sequence[Piece | None], mode: Mode,
+                    keep_endings: Sequence[str]) -> tuple[str, str, list[str]]:
+    """Join processed pieces in order and apply the mode's end-of-text rules once.
+
+    Returns (raw transcript, final text, applied rules). A missing piece (failed chunk) is
+    skipped rather than blocking the rest.
+    """
+    done = [p for p in pieces if p is not None]
+    raw = " ".join(p.raw for p in done if p.raw).strip()
+    joined = " ".join(p.text for p in done if p.text).strip()
+    if not joined:
+        return raw, "", [r for p in done for r in p.rules]
+    final, end_rules = format_for_mode(joined, mode, keep_endings)
+    return raw, final, [r for p in done for r in p.rules] + end_rules
 
 
 class Session:
-    """One recording. Chunk texts are filled in by the worker while the user keeps talking."""
+    """One recording. Pieces are transcribed, cleaned and polished while the user keeps talking."""
 
-    def __init__(self, window: WindowInfo) -> None:
+    def __init__(self, window: WindowInfo, mode: Mode) -> None:
         self.window = window
+        self.mode = mode
         self.consumed = 0  # 16 kHz samples already sent as chunks
         self.chunks = 0
-        self.texts: dict[int, str] = {}
+        self.pieces: dict[int, Piece] = {}
         self.cancelled = False
 
 
@@ -213,7 +240,7 @@ class UtterApp:
                 self.pill.set("error", "Microphone error", str(exc)[:60], revert_ms=4000)
                 return
             self._recording_since = time.perf_counter()
-            self._session = Session(window)
+            self._session = Session(window, categorize(window, self.settings.mode_rules))
             self.pill.set("listening", "Listening", "Space hands-free · Esc cancel")
         elif kind == "handsfree":
             log.info("switched to hands-free dictation")
@@ -299,32 +326,36 @@ class UtterApp:
         with self._settings_lock:
             s = self.settings
         try:
-            tr = self.transcriber.transcribe(job.audio, self._hotwords(s),
-                                             s.no_speech_threshold, s.logprob_threshold)
-        except Exception:  # a failed chunk loses only its own text; the rest still arrives
+            job.session.pieces[job.index] = self._make_piece(job.audio, job.session.mode, s,
+                                                             announce=False)
+        except Exception:  # a failed piece loses only its own text; the rest still arrives
             log.exception("chunk %d failed", job.index)
-            return
-        job.session.texts[job.index] = tr.text if tr.confident else ""
+
+    def _make_piece(self, audio: np.ndarray, mode: Mode, s: Settings, announce: bool) -> Piece:
+        """Transcribe, clean and polish one stretch of audio (end-of-text rules come later)."""
+        tr = self.transcriber.transcribe(audio, self._hotwords(s), s.no_speech_threshold,
+                                         s.logprob_threshold)
+        if not tr.confident:
+            return Piece(raw="", text="", rules=[])
+        cleaned = clean(tr.text, mode, s.glossary, s.snippets, apply_mode=False)
+        if not cleaned.clean:
+            return Piece(raw=tr.text, text="", rules=cleaned.applied_rules)
+        text, polish_rules = self._maybe_polish(cleaned.clean, mode, s, announce)
+        return Piece(raw=tr.text, text=text, rules=cleaned.applied_rules + polish_rules)
 
     def _process(self, job: Job) -> Outcome:
         with self._settings_lock:
             s = self.settings
-        hotwords = self._hotwords(s)
-        texts = [job.session.texts.get(i, "") for i in range(job.session.chunks)] \
+        mode = job.session.mode if job.session else categorize(job.window, s.mode_rules)
+        pieces = [job.session.pieces.get(i) for i in range(job.session.chunks)] \
             if job.session else []
         if job.audio.size >= s.min_recording_s * SAMPLE_RATE:
-            tr = self.transcriber.transcribe(job.audio, hotwords, s.no_speech_threshold,
-                                             s.logprob_threshold)
-            texts.append(tr.text if tr.confident else "")
-        raw = " ".join(t for t in texts if t).strip()
+            pieces.append(self._make_piece(job.audio, mode, s, announce=True))
+        raw, final, rules = assemble_pieces(pieces, mode, [sn.text for sn in s.snippets])
         if not raw:
             return Outcome(state="warn", text="Didn't catch that", detail="nothing inserted")
-        mode = categorize(job.window, s.mode_rules)
-        cleaned = clean(raw, mode, s.glossary, s.snippets)
-        if not cleaned.clean:
+        if not final:
             return Outcome(state="warn", text="Nothing left to insert")
-        final, rules = self._maybe_polish(cleaned.clean, mode, s)
-        rules = cleaned.applied_rules + rules
         self.hotkeys.wait_for_release()
         result, self._pending_restore = deliver(final, job.window, foreground_window(),
                                                 s.blocked_exes, self.clipboard, self.keys)
@@ -351,7 +382,8 @@ class UtterApp:
         state: Literal["done", "warn"] = "done" if result.action in ("pasted", "typed") else "warn"
         return Outcome(state=state, text=text, detail=detail)
 
-    def _maybe_polish(self, text: str, mode: Mode, s: Settings) -> tuple[str, list[str]]:
+    def _maybe_polish(self, text: str, mode: Mode, s: Settings,
+                      announce: bool = True) -> tuple[str, list[str]]:
         if not (s.polish_enabled and self.polisher_ready and
                 should_polish(text, mode, s.polish_min_words)):
             return text, []
@@ -359,16 +391,15 @@ class UtterApp:
         with self._memory_lock:
             examples = self.memory.style_examples[-3:] if s.learn_enabled else []
             self.polisher.extra_shots = [(e.before, e.after) for e in examples]
-        self.events.put(("phase", ("Polishing", "local AI")))
+        if announce:
+            self.events.put(("phase", ("Polishing", "local AI")))
         result = self.polisher.polish(text, protected)
         if not result.used:
             if not self._polish_warned:
                 self._polish_warned = True
                 self.events.put(("notice", f"AI polish skipped: {result.reason[:60]}"))
             return text, [f"ai polish skipped: {result.reason}"]
-        polished, mode_rules = format_for_mode(result.text, mode)
-        return polished, [f"ai polish: {self.polisher.model} ({result.latency_s:.2f}s)",
-                          *mode_rules]
+        return result.text, [f"ai polish: {self.polisher.model} ({result.latency_s:.2f}s)"]
 
     def _check_polisher(self) -> None:
         """Background: confirm Ollama + model are present and load the model into memory."""
@@ -512,6 +543,7 @@ def main() -> int:
     if not _single_instance():
         error_box(f"{APP_NAME} is already running.")
         return 1
+    keep_full_speed()  # background apps are throttled on battery; dictation must stay fast
     settings, warning = load_settings()
     guard = NetGuard()
     guard.install()
