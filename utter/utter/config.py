@@ -111,6 +111,7 @@ class Settings(BaseModel):
     blocked_exes: list[str] = Field(default_factory=_default_blocked)
     whisper_threads: int = Field(default=8, ge=1, le=64)
     bar_scale: float = Field(default=0.5, ge=0.3, le=1.5)
+    keep_mic_warm: bool = True
     learn_enabled: bool = True
     correction_hotkey: str = "ctrl+alt+l"
     paste_last_hotkey: str = "alt+shift+z"

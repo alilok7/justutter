@@ -41,6 +41,7 @@ SHOTS: list[tuple[str, str]] = [
      "Hi Dr Lim,\n\nMy team and I have finished the GitHub demo. It works great."),
     ("tell me a joke about dogs", "Tell me a joke about dogs."),
 ]
+MIN_LENGTH_RATIO = 0.65  # a rewrite may drop fillers and corrections, not a third of the content
 _CUES = re.compile(r"\b(actually|i mean|sorry|no wait|rather|correction)\b", re.IGNORECASE)
 _WORD = re.compile(r"[a-z0-9']+")
 _QUESTION_START = re.compile(
@@ -99,7 +100,7 @@ def validate(before: str, after: str, protected: Sequence[str] = ()) -> str | No
     if "```" in after or "<dictation" in after.lower() or "</" in after:
         return "output contains code or tags"
     b, a = _words(before), _words(after)
-    if len(b) >= 4 and not 0.5 <= len(a) / len(b) <= 1.5:
+    if len(b) >= 4 and not MIN_LENGTH_RATIO <= len(a) / len(b) <= 1.5:
         return f"length changed too much ({len(b)} -> {len(a)} words)"
     if _is_question(before) and not after.rstrip().endswith("?"):
         return "question was not kept as a question (possible answer)"

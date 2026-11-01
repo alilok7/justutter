@@ -18,9 +18,21 @@ def test_candidate_terms() -> None:
     text = ("Yesterday we met Priya at NUS to test MERaLiON and GPT4 on paleontological data. "
             "I left.")
     terms = candidate_terms(text)
-    assert {"Priya", "NUS", "MERaLiON", "GPT4", "paleontological"} <= set(terms)
+    assert {"Priya", "NUS", "MERaLiON", "GPT4"} <= set(terms)
+    assert "paleontological" not in terms  # ordinary (if long) words are not learned
     assert "Yesterday" not in terms  # sentence start, not a name
     assert "I" not in terms
+
+
+def test_everyday_words_are_not_learned_or_used() -> None:
+    from utter.personal import is_learnable
+
+    m = PersonalMemory()
+    record_dictation(m, "Well, OK. You know I'm sure. So then You said OK, Please.")
+    assert not m.vocab
+    assert not is_learnable("I'm") and not is_learnable("OK") and is_learnable("Redactyl")
+    junk = PersonalMemory(vocab={"I'm": 9, "OK": 5, "You": 4, "NUS": 3})
+    assert hotwords(junk, []) == ["NUS"]
 
 
 def test_vocab_needs_two_sightings_and_glossary_comes_first() -> None:

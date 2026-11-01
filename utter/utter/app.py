@@ -54,7 +54,7 @@ _ERROR_ALREADY_EXISTS = 183
 _mutex: Any = None
 
 
-CHUNK_S = 12.0  # long recordings are processed in pieces of about this length while recording
+CHUNK_S = 25.0  # pieces stay inside Whisper's 30 s window: more context, same latency (P2)
 
 
 class Piece(BaseModel):
@@ -133,7 +133,7 @@ class UtterApp:
         self.polisher = Polisher(settings.polish_model, settings.polish_timeout_s)
         self.polisher_ready = False
         self._polish_warned = False
-        self.recorder = Recorder()
+        self.recorder = Recorder(warm=settings.keep_mic_warm)
         self.history = History(size=500, path=app_dir() / "history.jsonl"
                                if settings.save_history else None)
         self.stats_path = app_dir() / "stats.json"
@@ -165,6 +165,12 @@ class UtterApp:
         worker.start()
         threading.Thread(target=self._check_polisher, name="utter-polish-check",
                          daemon=True).start()
+        if self.recorder.warm:
+            try:
+                self.recorder.open()
+            except Exception as exc:  # no mic yet: fall back to opening it per dictation
+                log.warning("warm microphone unavailable (%s); opening per dictation", exc)
+                self.recorder.warm = False
         self.hotkeys.start()
         for interval, fn in ((30, self._poll), (1000, self._tick)):
             timer = QTimer()
@@ -221,7 +227,7 @@ class UtterApp:
         pending = audio[session.consumed:]
         if pending.size < CHUNK_S * SAMPLE_RATE:
             return
-        cut = session.consumed + find_split(pending)
+        cut = session.consumed + find_split(pending, search_s=5.0)
         self.jobs.put(ChunkJob(session=session, index=session.chunks,
                                audio=audio[session.consumed:cut]))
         log.info("queued chunk %d (%.1fs) for background transcription", session.chunks,
@@ -262,7 +268,9 @@ class UtterApp:
             self._recording_since = None
             session, self._session = self._session, None
             target = self._start_window
-            if target is None or audio.size < self.settings.min_recording_s * SAMPLE_RATE:
+            preroll = self.recorder.preroll_s if self.recorder.warm else 0.0
+            shortest = (self.settings.min_recording_s + preroll) * SAMPLE_RATE
+            if target is None or audio.size < shortest:
                 self.pill.set("warn", "Too short", "hold the keys while you speak", revert_ms=2000)
                 return
             consumed = session.consumed if session else 0
@@ -554,7 +562,7 @@ class UtterApp:
         log.info("shutting down")
         self.hotkeys.stop()
         self.jobs.put(None)
-        self.recorder.stop()
+        self.recorder.close()
         save_stats(self.stats, self.stats_path)
         self.guard.uninstall()
 

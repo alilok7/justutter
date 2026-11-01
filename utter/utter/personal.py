@@ -30,15 +30,32 @@ class PersonalMemory(BaseModel):
     corrections_learned: int = 0
 
 
+# Everyday words Whisper capitalises mid-sentence; biasing towards them only adds noise.
+_EVERYDAY = frozenset({
+    "i", "i'm", "i've", "i'll", "i'd", "ok", "okay", "you", "so", "please", "yes", "no", "yeah",
+    "hey", "hi", "hello", "thanks", "thank", "also", "and", "but", "then", "the", "a", "an", "it",
+    "its", "this", "that", "we", "they", "he", "she", "my", "your", "our", "oh", "well", "right",
+    "sure", "just", "like", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "sunday",
+})
+
+
+def is_learnable(word: str) -> bool:
+    """Names, acronyms and coded terms (MERaLiON, GPT4, Pterodactylus), not everyday words."""
+    if len(word) < 2 or word.lower() in _EVERYDAY or "'" in word:
+        return False
+    mixed = any(c.isupper() for c in word[1:]) or any(c.isdigit() for c in word)
+    return mixed or word[0].isupper()
+
+
 def candidate_terms(text: str) -> list[str]:
-    """Words worth biasing Whisper towards: names, mixed-case/coded terms and long rare words."""
+    """Capitalised (not sentence-initial), mixed-case or digit-bearing terms worth learning."""
     found: list[str] = []
     for m in _TOKEN.finditer(text):
         word = m.group(0)
-        at_start = bool(_SENTENCE_START.search(text[: m.start()]))
         mixed = any(c.isupper() for c in word[1:]) or any(c.isdigit() for c in word)
-        proper = word[0].isupper() and not at_start and word.lower() != "i"
-        if mixed or proper or len(word) >= 10:
+        at_start = bool(_SENTENCE_START.search(text[: m.start()]))
+        if is_learnable(word) and (mixed or not at_start):
             found.append(word)
     return found
 
@@ -46,7 +63,8 @@ def candidate_terms(text: str) -> list[str]:
 def hotwords(memory: PersonalMemory, glossary_terms: Sequence[str],
              limit: int = MAX_HOTWORDS) -> list[str]:
     terms = list(dict.fromkeys(glossary_terms))
-    frequent = sorted((t for t, n in memory.vocab.items() if n >= MIN_TERM_COUNT),
+    frequent = sorted((t for t, n in memory.vocab.items()
+                       if n >= MIN_TERM_COUNT and is_learnable(t)),
                       key=lambda t: (-memory.vocab[t], t))
     for term in frequent:
         if term not in terms:

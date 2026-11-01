@@ -48,6 +48,30 @@ def test_silence_is_not_confident() -> None:
     assert result.confident is False
 
 
+def test_vad_retry_only_for_audible_audio() -> None:
+    import numpy as np
+
+    from utter.transcriber import needs_vad_retry
+
+    assert not needs_vad_retry(np.zeros(16000, dtype=np.float32))
+    assert not needs_vad_retry(np.full(16000, 0.001, dtype=np.float32))
+    assert needs_vad_retry(np.full(16000, 0.01, dtype=np.float32))
+
+
+@needs_model
+def test_quiet_speech_is_still_transcribed() -> None:
+    from utter.evaluate import EVALS_DIR, read_wav, word_error_rate
+
+    clip = EVALS_DIR / "audio" / "s01-plain.wav"
+    if not clip.exists():
+        pytest.skip("eval audio missing")
+    t = Transcriber("base.en", models_dir())
+    quiet = read_wav(clip) * 0.02  # roughly a soft voice far from a laptop mic
+    result = t.transcribe(quiet.astype("float32"))
+    assert word_error_rate("hey team the design review is moved to tomorrow afternoon",
+                           result.text) < 0.2
+
+
 @needs_model
 def test_rejects_wrong_audio_format() -> None:
     import numpy as np

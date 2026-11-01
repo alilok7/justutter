@@ -12,8 +12,9 @@ def piece(raw: str, mode: Mode) -> Piece:
     return Piece(raw=raw, text=cleaned.clean, rules=cleaned.applied_rules)
 
 
-def test_chunk_length_is_short_enough_to_keep_release_fast() -> None:
-    assert CHUNK_S <= 12.0
+def test_pieces_fit_in_one_whisper_window() -> None:
+    # Whisper costs the same up to 30 s, so long pieces keep context at no latency cost (P2).
+    assert 20.0 <= CHUNK_S <= 28.0
 
 
 def test_pieces_keep_their_inner_punctuation_in_chat_mode() -> None:

@@ -202,6 +202,28 @@ costs about 1.5 s per pass whatever the clip length (the 30 s window is padded),
   3.53 s throttled to 1.59 s, the same as on AC power. A 46 s dictation dropped from 10.3 s to 4.0 s
   release-to-text with M3, measured while throttled.
 
+### P. Accuracy fixes (user report 2 Nov: "lost its accuracy, not picking up words")
+Evidence from the log: across 6 recordings, 0.5–0.65 s of held time had no audio captured (one 0.55 s press
+captured 0.00 s), so first words were clipped. The mic opens in 100–175 ms, and the rest is the Intel
+Smart Sound array waking from power-saving. Pieces of real mic audio came back empty from the voice
+detector in 0.02 s. The 12 s pieces cut sentences while giving no speed benefit, because Whisper costs a
+fixed ~1.5 s per pass up to 30 s.
+- P1 (T): **Warm microphone.** The input stream opens once at startup and stays open. A rolling 0.4 s
+  pre-roll (memory only) is prepended when Ctrl+Win is pressed, so the first word is never lost.
+  `keep_mic_warm` (default on) can turn this off. Windows shows its mic-in-use icon while it's on. If
+  the stream dies, it is reopened on the next press.
+- P2 (T): Pieces are about 25 s, cut at the quietest point within their last 5 s. This replaces M3's 12 s;
+  release latency is unchanged because Whisper's cost is flat up to 30 s.
+- P3 (T): One retry at temperature 0.4, used only when Whisper's own quality checks fail (it repeated
+  itself or had low confidence). This replaces M1's no-retry.
+- P4 (T): Voice-detector safety net. If it finds no speech but the audio has energy (RMS ≥ 0.003),
+  Whisper runs again without it. The detector's threshold is lowered to 0.35.
+- P5 (T): AI polish may shorten a text to no less than 0.65× its word count (was 0.5×).
+- P6 (T): The vocabulary learner ignores everyday words (I'm, OK, You, So…) and long lowercase words;
+  it learns only names, acronyms and mixed-case or digit terms. Existing junk is filtered on load.
+- P7: Each recording logs its held time vs captured audio, plus the audio level, so a future regression
+  shows up in the log.
+
 ### N. Lists
 - N1 (T, E): Spoken sequences become a numbered list: "one, … two, … three, …" or "first, … second, …",
   also as digits ("1. … 2. …"). A marker must be followed by punctuation, start at 1, run in order, and

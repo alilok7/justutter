@@ -43,6 +43,13 @@ def test_validate_rejects(after: str, reason: str) -> None:
     assert result is not None and reason in result
 
 
+def test_validate_rejects_rewrite_that_drops_a_third() -> None:
+    before = "we should ship the new build to the beta testers on friday after lunch"
+    after = "Ship the build to testers on Friday."
+    result = validate(before, after)
+    assert result is not None and "length" in result
+
+
 def test_validate_rejects_changed_line_breaks_and_dropped_terms() -> None:
     before = "Hi Professor Tan,\n\nThe MERaLiON report is ready."
     assert "line breaks" in (validate(before, "Hi Professor Tan, the MERaLiON report is ready.")

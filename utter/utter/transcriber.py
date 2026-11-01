@@ -7,6 +7,7 @@ import os
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from faster_whisper import WhisperModel
@@ -34,6 +35,16 @@ def model_path(models_root: Path, name: str) -> Path:
     return models_root / name
 
 
+VAD_THRESHOLD = 0.35  # Silero's default 0.5 dropped real (quiet, laptop-mic) speech
+AUDIBLE_RMS = 0.003
+
+
+def needs_vad_retry(audio: np.ndarray) -> bool:
+    """The voice detector found nothing; is there enough sound that speech may have been lost?"""
+    level = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2))) if audio.size else 0.0
+    return level >= AUDIBLE_RMS
+
+
 def is_confident(text: str, avg_logprob: float, no_speech_prob: float,
                  no_speech_threshold: float, logprob_threshold: float) -> bool:
     return bool(text.strip()) and no_speech_prob <= no_speech_threshold and (
@@ -58,6 +69,21 @@ class Transcriber:
         )
         log.info("loaded model %s in %.2fs", name, time.perf_counter() - started)
 
+    def _decode(self, audio: np.ndarray, hotwords: Sequence[str], vad: bool) -> list[Any]:
+        segments, _info = self._model.transcribe(
+            audio,
+            language="en",
+            beam_size=self.beam_size,
+            # One retry only when Whisper's own checks fail (repetition / low confidence), P3.
+            temperature=(0.0, 0.4),
+            vad_filter=vad,
+            vad_parameters={"threshold": VAD_THRESHOLD} if vad else None,
+            condition_on_previous_text=False,
+            without_timestamps=True,
+            hotwords=", ".join(hotwords) if hotwords else None,
+        )
+        return list(segments)
+
     def warmup(self) -> None:
         self.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32))
 
@@ -67,17 +93,10 @@ class Transcriber:
         if audio.dtype != np.float32 or audio.ndim != 1:
             raise ValueError("audio must be 1-D float32 mono at 16 kHz")
         started = time.perf_counter()
-        segments, _info = self._model.transcribe(
-            audio,
-            language="en",
-            beam_size=self.beam_size,
-            temperature=0.0,  # no retry loop: low confidence is refused instead (M1)
-            vad_filter=True,
-            condition_on_previous_text=False,
-            without_timestamps=True,
-            hotwords=", ".join(hotwords) if hotwords else None,
-        )
-        segs = list(segments)
+        segs = self._decode(audio, hotwords, vad=True)
+        if not segs and needs_vad_retry(audio):
+            log.info("voice detector found no speech in audible audio; retrying without it")
+            segs = self._decode(audio, hotwords, vad=False)
         latency = time.perf_counter() - started
         text = " ".join(s.text.strip() for s in segs).strip()
         if segs:
